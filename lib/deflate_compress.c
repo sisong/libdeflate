@@ -454,7 +454,7 @@ struct deflate_output_bitstream;
 struct libdeflate_compressor {
 
 	/* Pointer to the compress() implementation chosen at allocation time */
-	void (*impl)(struct libdeflate_compressor *restrict c, const u8 *in,
+	void (*impl)(struct libdeflate_compressor *restrict c,const u8* in_block_with_dict,size_t dict_nbytes,
 		     size_t in_nbytes, struct deflate_output_bitstream *os);
 
 	/* The free() function for this struct, chosen at allocation time */
@@ -462,6 +462,7 @@ struct libdeflate_compressor {
 
 	/* The compression level with which this compressor was created */
 	unsigned compression_level;
+	bool     in_is_end_block;
 
 	/* Anything of this size or less we won't bother trying to compress. */
 	size_t max_passthrough_size;
@@ -1736,6 +1737,8 @@ deflate_flush_block(struct libdeflate_compressor *c,
 
 	ASSERT(block_length >= MIN_BLOCK_LENGTH ||
 	       (is_final_block && block_length > 0));
+    is_final_block=is_final_block&&c->in_is_end_block;
+    
 	ASSERT(block_length <= MAX_BLOCK_LENGTH);
 	ASSERT(bitcount <= 7);
 	ASSERT((bitbuf & ~(((bitbuf_t)1 << bitcount) - 1)) == 0);
@@ -2390,7 +2393,7 @@ choose_max_block_end(const u8 *in_block_begin, const u8 *in_end,
  */
 static size_t
 deflate_compress_none(const u8 *in, size_t in_nbytes,
-		      u8 *out, size_t out_nbytes_avail)
+		      u8 *out, size_t out_nbytes_avail,bool in_is_end_block)
 {
 	const u8 *in_next = in;
 	const u8 * const in_end = in + in_nbytes;
@@ -2406,7 +2409,7 @@ deflate_compress_none(const u8 *in, size_t in_nbytes,
 		if (out_nbytes_avail < 5)
 			return 0;
 		/* BFINAL and BTYPE */
-		*out_next++ = 1 | (DEFLATE_BLOCKTYPE_UNCOMPRESSED << 1);
+		*out_next++ = (in_is_end_block?1:0) | (DEFLATE_BLOCKTYPE_UNCOMPRESSED << 1);
 		/* LEN and NLEN */
 		put_unaligned_le32(0xFFFF0000, out_next);
 		return 5;
@@ -2417,7 +2420,7 @@ deflate_compress_none(const u8 *in, size_t in_nbytes,
 		size_t len = UINT16_MAX;
 
 		if (in_end - in_next <= UINT16_MAX) {
-			bfinal = 1;
+			bfinal = (in_is_end_block?1:0);
 			len = in_end - in_next;
 		}
 		if (out_end - out_next < 5 + len)
@@ -2449,12 +2452,12 @@ deflate_compress_none(const u8 *in, size_t in_nbytes,
  */
 static void
 deflate_compress_fastest(struct libdeflate_compressor * restrict c,
-			 const u8 *in, size_t in_nbytes,
+			 const u8* in_block_with_dict,size_t dict_nbytes, size_t in_nbytes,
 			 struct deflate_output_bitstream *os)
 {
-	const u8 *in_next = in;
+	const u8 *in_next = in_block_with_dict+dict_nbytes;
 	const u8 *in_end = in_next + in_nbytes;
-	const u8 *in_cur_base = in_next;
+	const u8 *in_cur_base = in_block_with_dict;
 	unsigned max_len = DEFLATE_MAX_MATCH_LEN;
 	unsigned nice_len = MIN(c->nice_match_length, max_len);
 	u32 next_hash = 0;
@@ -2526,12 +2529,12 @@ deflate_compress_fastest(struct libdeflate_compressor * restrict c,
  */
 static void
 deflate_compress_greedy(struct libdeflate_compressor * restrict c,
-			const u8 *in, size_t in_nbytes,
+			const u8* in_block_with_dict,size_t dict_nbytes, size_t in_nbytes,
 			struct deflate_output_bitstream *os)
 {
-	const u8 *in_next = in;
+	const u8 *in_next = in_block_with_dict+dict_nbytes;
 	const u8 *in_end = in_next + in_nbytes;
-	const u8 *in_cur_base = in_next;
+	const u8 *in_cur_base = in_block_with_dict;
 	unsigned max_len = DEFLATE_MAX_MATCH_LEN;
 	unsigned nice_len = MIN(c->nice_match_length, max_len);
 	u32 next_hashes[2] = {0, 0};
@@ -2602,12 +2605,12 @@ deflate_compress_greedy(struct libdeflate_compressor * restrict c,
 
 static forceinline void
 deflate_compress_lazy_generic(struct libdeflate_compressor * restrict c,
-			      const u8 *in, size_t in_nbytes,
+			      const u8 *in_block_with_dict,size_t dict_nbytes, size_t in_nbytes,
 			      struct deflate_output_bitstream *os, bool lazy2)
 {
-	const u8 *in_next = in;
+	const u8 *in_next = in_block_with_dict+dict_nbytes;
 	const u8 *in_end = in_next + in_nbytes;
-	const u8 *in_cur_base = in_next;
+	const u8 *in_cur_base = in_block_with_dict;
 	unsigned max_len = DEFLATE_MAX_MATCH_LEN;
 	unsigned nice_len = MIN(c->nice_match_length, max_len);
 	u32 next_hashes[2] = {0, 0};
@@ -2813,10 +2816,10 @@ have_cur_match:
  */
 static void
 deflate_compress_lazy(struct libdeflate_compressor * restrict c,
-		      const u8 *in, size_t in_nbytes,
+		      const u8 *in_block_with_dict,size_t dict_nbytes, size_t in_nbytes,
 		      struct deflate_output_bitstream *os)
 {
-	deflate_compress_lazy_generic(c, in, in_nbytes, os, false);
+	deflate_compress_lazy_generic(c, in_block_with_dict,dict_nbytes, in_nbytes, os, false);
 }
 
 /*
@@ -2826,10 +2829,10 @@ deflate_compress_lazy(struct libdeflate_compressor * restrict c,
  */
 static void
 deflate_compress_lazy2(struct libdeflate_compressor * restrict c,
-		       const u8 *in, size_t in_nbytes,
+		       const u8 *in_block_with_dict,size_t dict_nbytes, size_t in_nbytes,
 		       struct deflate_output_bitstream *os)
 {
-	deflate_compress_lazy_generic(c, in, in_nbytes, os, true);
+	deflate_compress_lazy_generic(c, in_block_with_dict,dict_nbytes, in_nbytes, os, true);
 }
 
 #if SUPPORT_NEAR_OPTIMAL_PARSING
@@ -3590,13 +3593,14 @@ deflate_near_optimal_clear_old_stats(struct libdeflate_compressor *c)
  */
 static void
 deflate_compress_near_optimal(struct libdeflate_compressor * restrict c,
-			      const u8 *in, size_t in_nbytes,
+			      const u8 *in_block_with_dict,size_t dict_nbytes, size_t in_nbytes,
 			      struct deflate_output_bitstream *os)
 {
+    const u8* in=in_block_with_dict+dict_nbytes;
 	const u8 *in_next = in;
 	const u8 *in_block_begin = in_next;
 	const u8 *in_end = in_next + in_nbytes;
-	const u8 *in_cur_base = in_next;
+	const u8 *in_cur_base = in_block_with_dict;
 	const u8 *in_next_slide =
 		in_next + MIN(in_end - in_next, MATCHFINDER_WINDOW_SIZE);
 	unsigned max_len = DEFLATE_MAX_MATCH_LEN;
@@ -4024,15 +4028,25 @@ libdeflate_deflate_compress(struct libdeflate_compressor *c,
 			    const void *in, size_t in_nbytes,
 			    void *out, size_t out_nbytes_avail)
 {
+	return libdeflate_deflate_compress_block(c,in,0,in_nbytes,1,out,out_nbytes_avail);
+}
+
+LIBDEFLATEAPI size_t
+libdeflate_deflate_compress_block(struct libdeflate_compressor *c,
+			    const void *in_block_with_dict,size_t dict_nbytes,size_t in_nbytes,int in_is_end_block,
+			    void *out, size_t out_nbytes_avail)
+{
 	struct deflate_output_bitstream os;
+	c->in_is_end_block=(in_is_end_block!=0);
 
 	/*
 	 * For extremely short inputs, or for compression level 0, just output
 	 * uncompressed blocks.
 	 */
-	if (unlikely(in_nbytes <= c->max_passthrough_size))
-		return deflate_compress_none(in, in_nbytes,
-					     out, out_nbytes_avail);
+	if (unlikely(in_nbytes <= c->max_passthrough_size)){
+		const u8* in=((const u8*)in_block_with_dict)+dict_nbytes;
+		return deflate_compress_none(in,in_nbytes,out,out_nbytes_avail,c->in_is_end_block);
+	}
 
 	/* Initialize the output bitstream structure. */
 	os.bitbuf = 0;
@@ -4042,7 +4056,7 @@ libdeflate_deflate_compress(struct libdeflate_compressor *c,
 	os.overflow = false;
 
 	/* Call the actual compression function. */
-	(*c->impl)(c, in, in_nbytes, &os);
+	(*c->impl)(c,in_block_with_dict,dict_nbytes,in_nbytes,&os);
 
 	/* Return 0 if the output buffer is too small. */
 	if (os.overflow)
