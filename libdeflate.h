@@ -86,6 +86,11 @@ libdeflate_deflate_compress(struct libdeflate_compressor *compressor,
 			    const void *in, size_t in_nbytes,
 			    void *out, size_t out_nbytes_avail);
 
+LIBDEFLATEAPI size_t
+libdeflate_deflate_compress_block(struct libdeflate_compressor *compressor,
+			    const void *in_block_with_dict,size_t dict_nbytes,size_t in_block_nbytes,int in_is_end_block,
+			    void *out_part, size_t out_part_nbytes_avail);
+
 /*
  * libdeflate_deflate_compress_bound() returns a worst-case upper bound on the
  * number of bytes of compressed data that may be produced by compressing any
@@ -254,6 +259,13 @@ LIBDEFLATEAPI enum libdeflate_result
 libdeflate_deflate_decompress_ex(struct libdeflate_decompressor *decompressor,
 				 const void *in, size_t in_nbytes,
 				 void *out, size_t out_nbytes_avail,
+				 size_t *actual_in_nbytes_ret,
+				 size_t *actual_out_nbytes_ret);
+
+LIBDEFLATEAPI enum libdeflate_result
+libdeflate_deflate_decompress_block(struct libdeflate_decompressor *decompressor,
+				 const void *in_part, size_t in_part_nbytes_bound,int in_is_end_part,
+				 void *out_block_with_in_dict,size_t in_dict_nbytes, size_t out_block_nbytes,
 				 size_t *actual_in_nbytes_ret,
 				 size_t *actual_out_nbytes_ret);
 
