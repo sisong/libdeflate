@@ -89,7 +89,7 @@ libdeflate_deflate_compress(struct libdeflate_compressor *compressor,
 LIBDEFLATEAPI size_t
 libdeflate_deflate_compress_block(struct libdeflate_compressor *compressor,
 			    const void *in_block_with_dict,size_t dict_nbytes,size_t in_block_nbytes,int in_is_end_block,
-			    void *out_part, size_t out_part_nbytes_avail);
+			    void *out_part, size_t out_part_nbytes_avail,int out_is_flush_to_byte_align);
 
 /*
  * libdeflate_deflate_compress_bound() returns a worst-case upper bound on the

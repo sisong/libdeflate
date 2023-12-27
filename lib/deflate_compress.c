@@ -450,6 +450,13 @@ struct block_split_stats {
 
 struct deflate_output_bitstream;
 
+/*
+ * The type for the bitbuffer variable, which temporarily holds bits that are
+ * being packed into bytes and written to the output buffer.  For best
+ * performance, this should have size equal to a machine word.
+ */
+typedef machine_word_t bitbuf_t;
+
 /* The main DEFLATE compressor structure */
 struct libdeflate_compressor {
 
@@ -463,6 +470,8 @@ struct libdeflate_compressor {
 	/* The compression level with which this compressor was created */
 	unsigned compression_level;
 	bool     in_is_end_block;
+	bitbuf_t bitbuf_back_for_block;
+	unsigned bitcount_back_for_block;
 
 	/* Anything of this size or less we won't bother trying to compress. */
 	size_t max_passthrough_size;
@@ -661,13 +670,6 @@ struct libdeflate_compressor {
 
 	} p; /* (p)arser */
 };
-
-/*
- * The type for the bitbuffer variable, which temporarily holds bits that are
- * being packed into bytes and written to the output buffer.  For best
- * performance, this should have size equal to a machine word.
- */
-typedef machine_word_t bitbuf_t;
 
 /*
  * The capacity of the bitbuffer, in bits.  This is 1 less than the real size,
@@ -3913,6 +3915,9 @@ libdeflate_alloc_compressor_ex(int compression_level,
 		       options->free_func : libdeflate_default_free_func;
 
 	c->compression_level = compression_level;
+	c->in_is_end_block = false;
+	c->bitbuf_back_for_block=0;
+	c->bitcount_back_for_block=0;
 
 	/*
 	 * The higher the compression level, the more we should bother trying to
@@ -4028,29 +4033,39 @@ libdeflate_deflate_compress(struct libdeflate_compressor *c,
 			    const void *in, size_t in_nbytes,
 			    void *out, size_t out_nbytes_avail)
 {
-	return libdeflate_deflate_compress_block(c,in,0,in_nbytes,1,out,out_nbytes_avail);
+	return libdeflate_deflate_compress_block(c,in,0,in_nbytes,true,out,out_nbytes_avail,false);
+}
+
+
+static bool _deflate_flush_to_byte_align(struct deflate_output_bitstream* os){
+    ASSERT((os->bitcount>0)&&(os->bitcount<=7));
+	//todo: 
+    return true;
 }
 
 LIBDEFLATEAPI size_t
 libdeflate_deflate_compress_block(struct libdeflate_compressor *c,
 			    const void *in_block_with_dict,size_t dict_nbytes,size_t in_nbytes,int in_is_end_block,
-			    void *out, size_t out_nbytes_avail)
+			    void *out, size_t out_nbytes_avail,int out_is_flush_to_byte_align)
 {
 	struct deflate_output_bitstream os;
 	c->in_is_end_block=(in_is_end_block!=0);
+	os.bitbuf = c->bitbuf_back_for_block;
+	os.bitcount = c->bitcount_back_for_block;
+	c->bitbuf_back_for_block=0;
+	c->bitcount_back_for_block=0;
 
 	/*
 	 * For extremely short inputs, or for compression level 0, just output
 	 * uncompressed blocks.
 	 */
 	if (unlikely(in_nbytes <= c->max_passthrough_size)){
+		ASSERT(os.bitcount==0); //todo:
 		const u8* in=((const u8*)in_block_with_dict)+dict_nbytes;
 		return deflate_compress_none(in,in_nbytes,out,out_nbytes_avail,c->in_is_end_block);
 	}
 
 	/* Initialize the output bitstream structure. */
-	os.bitbuf = 0;
-	os.bitcount = 0;
 	os.next = out;
 	os.end = os.next + out_nbytes_avail;
 	os.overflow = false;
@@ -4069,8 +4084,16 @@ libdeflate_deflate_compress_block(struct libdeflate_compressor *c,
 	 */
 	ASSERT(os.bitcount <= 7);
 	if (os.bitcount) {
-		ASSERT(os.next < os.end);
-		*os.next++ = os.bitbuf;
+		if (in_is_end_block){
+			ASSERT(os.next < os.end);
+        	*os.next++ = os.bitbuf;
+		}else if (out_is_flush_to_byte_align){ 
+			if (!_deflate_flush_to_byte_align(&os))
+            	return 0;
+		}else{ //backup for next block
+			c->bitbuf_back_for_block=os.bitbuf;
+			c->bitcount_back_for_block=os.bitcount;
+		}
 	}
 
 	/* Return the compressed size in bytes. */
