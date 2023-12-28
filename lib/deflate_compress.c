@@ -2411,7 +2411,7 @@ deflate_compress_none(const u8 *in, size_t in_nbytes,
 	 * specially to avoid potentially passing NULL to memcpy() below.
 	 */
 	if (unlikely((in_nbytes == 0)&&(bitcount<=5))) {
-		if (out_nbytes_avail < 5)
+		if (unlikely(out_nbytes_avail < 5))
 			return 0;
 		/* BFINAL and BTYPE */
 		*out_next++ = ((in_is_end_block?1:0)<<bitcount) | bitbuf;
@@ -4080,9 +4080,41 @@ libdeflate_deflate_compress(struct libdeflate_compressor *c,
 }
 
 
-static bool _deflate_flush_to_byte_align(struct deflate_output_bitstream* os){
-    ASSERT((os->bitcount>0)&&(os->bitcount<=7));
-	//todo: 
+static forceinline bool __deflate_prime(struct deflate_output_bitstream* os,int bits,unsigned value) {
+    int put;
+	#define __k_deflate_prime_Buf_size 	16
+	ASSERT((bits>=0) && (bits<=__k_deflate_prime_Buf_size));
+    do {
+        put = __k_deflate_prime_Buf_size - (int)os->bitcount;
+        put = (put > bits) ? bits : put;
+        os->bitbuf |= (unsigned)((value & ((1 << put) - 1)) << os->bitcount);
+        os->bitcount += put;
+        while (os->bitcount>=8){
+			if (likely(os->next<os->end)){
+				*os->next++=(u8)os->bitbuf;
+				os->bitbuf >>= 8;
+				os->bitcount -= 8;
+			} else
+				return false;
+		}
+        value >>= put;
+        bits -= put;
+    } while (unlikely(bits>0));
+    return true;
+}
+
+static forceinline bool _deflate_flush_to_byte_align(struct deflate_output_bitstream* os){
+    ASSERT((os->bitcount>=1)&&(os->bitcount<=7));
+	if (os->bitcount&1){
+		size_t cbytes=deflate_compress_none(0,0,os->next,os->end-os->next,os->bitbuf,os->bitcount,false);
+		os->next+=cbytes;
+		return (0!=cbytes);
+	}else{
+		do { // add static empty blocks
+			if (unlikely(!__deflate_prime(os,10,2)))
+				return false;
+        } while (unlikely(os->bitcount>0));
+	}
     return true;
 }
 
