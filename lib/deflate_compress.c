@@ -2395,23 +2395,26 @@ choose_max_block_end(const u8 *in_block_begin, const u8 *in_end,
  */
 static size_t
 deflate_compress_none(const u8 *in, size_t in_nbytes,
-		      u8 *out, size_t out_nbytes_avail,bool in_is_end_block)
+		      u8 *out, size_t out_nbytes_avail,
+			  bitbuf_t bitbuf,unsigned bitcount,bool in_is_end_block)
 {
 	const u8 *in_next = in;
 	const u8 * const in_end = in + in_nbytes;
 	u8 *out_next = out;
 	u8 * const out_end = out + out_nbytes_avail;
+    ASSERT(bitcount<=7);
+	STATIC_ASSERT(DEFLATE_BLOCKTYPE_UNCOMPRESSED == 0);
 
 	/*
 	 * If the input is zero-length, we still must output a block in order
 	 * for the output to be a valid DEFLATE stream.  Handle this case
 	 * specially to avoid potentially passing NULL to memcpy() below.
 	 */
-	if (unlikely(in_nbytes == 0)) {
+	if (unlikely((in_nbytes == 0)&&(bitcount<=5))) {
 		if (out_nbytes_avail < 5)
 			return 0;
 		/* BFINAL and BTYPE */
-		*out_next++ = (in_is_end_block?1:0) | (DEFLATE_BLOCKTYPE_UNCOMPRESSED << 1);
+		*out_next++ = ((in_is_end_block?1:0)<<bitcount) | bitbuf;
 		/* LEN and NLEN */
 		put_unaligned_le32(0xFFFF0000, out_next);
 		return 5;
@@ -2425,6 +2428,8 @@ deflate_compress_none(const u8 *in, size_t in_nbytes,
 			bfinal = (in_is_end_block?1:0);
 			len = in_end - in_next;
 		}
+
+		if (bitcount==0){
 		if (out_end - out_next < 5 + len)
 			return 0;
 		/*
@@ -2432,6 +2437,20 @@ deflate_compress_none(const u8 *in, size_t in_nbytes,
 		 * here, so this step always requires outputting exactly 1 byte.
 		 */
 		*out_next++ = bfinal | (DEFLATE_BLOCKTYPE_UNCOMPRESSED << 1);
+		}else{
+			/* It was already checked that there is enough space. */
+			if (out_end - out_next < DIV_ROUND_UP(bitcount + 3, 8) + 4 + len)
+				return 0;
+			/*
+			* Output BFINAL (1 bit) and BTYPE (2 bits), then align
+			* to a byte boundary.
+			*/
+			*out_next++ = (bfinal << bitcount) | bitbuf;
+			if (unlikely(bitcount > 5))
+				*out_next++ = 0;
+			bitbuf = 0;
+			bitcount = 0;
+		}
 
 		/* Output LEN and NLEN, then the data itself. */
 		put_unaligned_le16(len, out_next);
@@ -4088,9 +4107,8 @@ libdeflate_deflate_compress_block(struct libdeflate_compressor *c,
 	 * uncompressed blocks.
 	 */
 	if (unlikely(in_nbytes <= c->max_passthrough_size)){
-		ASSERT(os.bitcount==0); //todo:
 		const u8* in=((const u8*)in_block_with_dict)+dict_nbytes;
-		return deflate_compress_none(in,in_nbytes,out,out_nbytes_avail,c->in_is_end_block);
+		return deflate_compress_none(in,in_nbytes,out,out_nbytes_avail,os.bitbuf,os.bitcount,c->in_is_end_block);
 	}
 
 	/* Initialize the output bitstream structure. */
