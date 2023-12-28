@@ -74,7 +74,7 @@ ht_matchfinder_slide_window(struct ht_matchfinder *mf)
 }
 
 /* Note: max_len must be >= HT_MATCHFINDER_REQUIRED_NBYTES */
-static forceinline u32
+static u32
 ht_matchfinder_longest_match(struct ht_matchfinder * const mf,
 			     const u8 ** const in_base_p,
 			     const u8 * const in_next,
@@ -194,7 +194,7 @@ out:
 	return best_len;
 }
 
-static forceinline void
+static void
 ht_matchfinder_skip_bytes(struct ht_matchfinder * const mf,
 			  const u8 ** const in_base_p,
 			  const u8 *in_next,

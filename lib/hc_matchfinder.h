@@ -179,7 +179,7 @@ hc_matchfinder_slide_window(struct hc_matchfinder *mf)
  * Return the length of the match found, or 'best_len' if no match longer than
  * 'best_len' was found.
  */
-static forceinline u32
+static u32
 hc_matchfinder_longest_match(struct hc_matchfinder * const mf,
 			     const u8 ** const in_base_p,
 			     const u8 * const in_next,
@@ -357,7 +357,7 @@ out:
  *	These will be used and then updated with the precomputed hashcodes for
  *	the sequence beginning at @in_next + @count.
  */
-static forceinline void
+static void
 hc_matchfinder_skip_bytes(struct hc_matchfinder * const mf,
 			  const u8 ** const in_base_p,
 			  const u8 *in_next,

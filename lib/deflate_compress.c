@@ -2640,7 +2640,7 @@ deflate_compress_greedy(struct libdeflate_compressor * restrict c,
 	} while (in_next != in_end && !os->overflow);
 }
 
-static forceinline void
+static void
 deflate_compress_lazy_generic(struct libdeflate_compressor * restrict c,
 			      const u8 *in_block_with_dict,size_t dict_nbytes, size_t in_nbytes,
 			      struct deflate_output_bitstream *os, bool lazy2)
@@ -4103,7 +4103,7 @@ static forceinline bool __deflate_prime(struct deflate_output_bitstream* os,int 
     return true;
 }
 
-static forceinline bool _deflate_flush_to_byte_align(struct deflate_output_bitstream* os){
+static bool _deflate_flush_to_byte_align(struct deflate_output_bitstream* os){
     ASSERT((os->bitcount>=1)&&(os->bitcount<=7));
 	if (os->bitcount&1){
 		size_t cbytes=deflate_compress_none(0,0,os->next,os->end-os->next,os->bitbuf,os->bitcount,false);
