@@ -2396,7 +2396,7 @@ choose_max_block_end(const u8 *in_block_begin, const u8 *in_end,
 static size_t
 deflate_compress_none(const u8 *in, size_t in_nbytes,
 		      u8 *out, size_t out_nbytes_avail,
-			  bitbuf_t bitbuf,unsigned bitcount,bool in_is_end_block)
+			  bitbuf_t bitbuf,unsigned bitcount,u8 is_end_block_0_1)
 {
 	const u8 *in_next = in;
 	const u8 * const in_end = in + in_nbytes;
@@ -2414,7 +2414,7 @@ deflate_compress_none(const u8 *in, size_t in_nbytes,
 		if (unlikely(out_nbytes_avail < 5))
 			return 0;
 		/* BFINAL and BTYPE */
-		*out_next++ = ((in_is_end_block?1:0)<<bitcount) | bitbuf;
+		*out_next++ = (u8)((is_end_block_0_1<<bitcount) | bitbuf);
 		/* LEN and NLEN */
 		put_unaligned_le32(0xFFFF0000, out_next);
 		return 5;
@@ -2425,7 +2425,7 @@ deflate_compress_none(const u8 *in, size_t in_nbytes,
 		size_t len = UINT16_MAX;
 
 		if (in_end - in_next <= UINT16_MAX) {
-			bfinal = (in_is_end_block?1:0);
+			bfinal = is_end_block_0_1;
 			len = in_end - in_next;
 		}
 
@@ -4106,7 +4106,7 @@ static forceinline bool __deflate_prime(struct deflate_output_bitstream* os,int 
 static bool _deflate_flush_to_byte_align(struct deflate_output_bitstream* os){
     ASSERT((os->bitcount>=1)&&(os->bitcount<=7));
 	if (os->bitcount&1){
-		size_t cbytes=deflate_compress_none(0,0,os->next,os->end-os->next,os->bitbuf,os->bitcount,false);
+		size_t cbytes=deflate_compress_none(0,0,os->next,os->end-os->next,os->bitbuf,os->bitcount,0);
 		os->next+=cbytes;
 		return (0!=cbytes);
 	}else{
@@ -4140,7 +4140,7 @@ libdeflate_deflate_compress_block(struct libdeflate_compressor *c,
 	 */
 	if (unlikely(in_nbytes <= c->max_passthrough_size)){
 		const u8* in=((const u8*)in_block_with_dict)+dict_nbytes;
-		return deflate_compress_none(in,in_nbytes,out,out_nbytes_avail,os.bitbuf,os.bitcount,c->in_is_end_block);
+		return deflate_compress_none(in,in_nbytes,out,out_nbytes_avail,os.bitbuf,os.bitcount,in_is_end_block?1:0);
 	}
 
 	/* Initialize the output bitstream structure. */
@@ -4241,14 +4241,25 @@ libdeflate_deflate_compress_bound(struct libdeflate_compressor *c,
 	return (5 * max_blocks) + in_nbytes;
 }
 
-LIBDEFLATEAPI uint64_t
+
+static forceinline size_t
+_compress_bound_block(struct libdeflate_compressor *c,size_t _one_block){
+	return libdeflate_deflate_compress_bound(c,_one_block)+5;
+}
+
+LIBDEFLATEAPI size_t
 libdeflate_deflate_compress_bound_block(struct libdeflate_compressor *c,
+				  size_t in_block_nbytes){
+	return _compress_bound_block(c,in_block_nbytes);
+}
+
+LIBDEFLATEAPI uint64_t
+libdeflate_deflate_compress_bound_blocks(struct libdeflate_compressor *c,
 				  uint64_t in_stream_nbytes,size_t in_block_nbytes){
 	uint64_t min_blocks;
-	size_t last_block_nbytes,a_bound_block;
+	size_t   last_block_nbytes;
 	ASSERT(in_block_nbytes>0);
-	a_bound_block=libdeflate_deflate_compress_bound(c,in_block_nbytes);
 	min_blocks=in_stream_nbytes/in_block_nbytes;
 	last_block_nbytes=in_stream_nbytes-in_block_nbytes*min_blocks;
-	return (a_bound_block+5)*min_blocks+(libdeflate_deflate_compress_bound(c,last_block_nbytes)+5)*1;
+	return _compress_bound_block(c,in_block_nbytes)*min_blocks+_compress_bound_block(c,last_block_nbytes);
 }
