@@ -4190,3 +4190,15 @@ libdeflate_deflate_compress_bound(struct libdeflate_compressor *c,
 	 */
 	return (5 * max_blocks) + in_nbytes;
 }
+
+LIBDEFLATEAPI uint64_t
+libdeflate_deflate_compress_bound_block(struct libdeflate_compressor *c,
+				  uint64_t in_stream_nbytes,size_t in_block_nbytes){
+	uint64_t min_blocks;
+	size_t last_block_nbytes,a_bound_block;
+	ASSERT(in_block_nbytes>0);
+	a_bound_block=libdeflate_deflate_compress_bound(c,in_block_nbytes);
+	min_blocks=in_stream_nbytes/in_block_nbytes;
+	last_block_nbytes=in_stream_nbytes-in_block_nbytes*min_blocks;
+	return (a_bound_block+5)*min_blocks+(libdeflate_deflate_compress_bound(c,last_block_nbytes)+5)*1;
+}

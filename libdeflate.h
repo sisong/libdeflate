@@ -119,6 +119,10 @@ LIBDEFLATEAPI size_t
 libdeflate_deflate_compress_bound(struct libdeflate_compressor *compressor,
 				  size_t in_nbytes);
 
+LIBDEFLATEAPI uint64_t
+libdeflate_deflate_compress_bound_block(struct libdeflate_compressor *compressor,
+				  uint64_t in_stream_nbytes,size_t in_block_nbytes);
+
 /*
  * Like libdeflate_deflate_compress(), but uses the zlib wrapper format instead
  * of raw DEFLATE.
