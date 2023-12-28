@@ -2465,6 +2465,14 @@ deflate_compress_fastest(struct libdeflate_compressor * restrict c,
 	u32 next_hash = 0;
 
 	ht_matchfinder_init(&c->p.f.ht_mf);
+	if (dict_nbytes>0){
+		ht_matchfinder_skip_bytes(&c->p.f.ht_mf,
+						&in_cur_base,
+						in_cur_base,
+						in_end,
+						dict_nbytes,
+						&next_hash);
+	}
 
 	do {
 		/* Starting a new DEFLATE block */
@@ -2542,6 +2550,14 @@ deflate_compress_greedy(struct libdeflate_compressor * restrict c,
 	u32 next_hashes[2] = {0, 0};
 
 	hc_matchfinder_init(&c->p.g.hc_mf);
+	if (dict_nbytes>0){
+		hc_matchfinder_skip_bytes(&c->p.g.hc_mf,
+						&in_cur_base,
+						in_cur_base,
+						in_end,
+						dict_nbytes,
+						next_hashes);
+	}
 
 	do {
 		/* Starting a new DEFLATE block */
@@ -2618,6 +2634,14 @@ deflate_compress_lazy_generic(struct libdeflate_compressor * restrict c,
 	u32 next_hashes[2] = {0, 0};
 
 	hc_matchfinder_init(&c->p.g.hc_mf);
+	if (dict_nbytes>0){
+		hc_matchfinder_skip_bytes(&c->p.g.hc_mf,
+						&in_cur_base,
+						in_cur_base,
+						in_end,
+						dict_nbytes,
+						next_hashes);
+	}
 
 	do {
 		/* Starting a new DEFLATE block */
@@ -4054,6 +4078,10 @@ libdeflate_deflate_compress_block(struct libdeflate_compressor *c,
 	os.bitcount = c->bitcount_back_for_block;
 	c->bitbuf_back_for_block=0;
 	c->bitcount_back_for_block=0;
+	if (unlikely(dict_nbytes>MATCHFINDER_WINDOW_SIZE)){
+		in_block_with_dict=((const u8*)in_block_with_dict)+dict_nbytes-MATCHFINDER_WINDOW_SIZE;
+		dict_nbytes=MATCHFINDER_WINDOW_SIZE;
+	}
 
 	/*
 	 * For extremely short inputs, or for compression level 0, just output
