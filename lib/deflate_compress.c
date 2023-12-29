@@ -2430,13 +2430,13 @@ deflate_compress_none(const u8 *in, size_t in_nbytes,
 		}
 
 		if (bitcount==0){
-		if (out_end - out_next < 5 + len)
-			return 0;
-		/*
-		 * Output BFINAL and BTYPE.  The stream is already byte-aligned
-		 * here, so this step always requires outputting exactly 1 byte.
-		 */
-		*out_next++ = bfinal | (DEFLATE_BLOCKTYPE_UNCOMPRESSED << 1);
+        	if (out_end - out_next < 5 + len)
+				return 0;
+			/*
+			* Output BFINAL and BTYPE.  The stream is already byte-aligned
+			* here, so this step always requires outputting exactly 1 byte.
+			*/
+        	*out_next++ = bfinal | (DEFLATE_BLOCKTYPE_UNCOMPRESSED << 1);
 		}else{
 			/* It was already checked that there is enough space. */
 			if (out_end - out_next < DIV_ROUND_UP(bitcount + 3, 8) + 4 + len)

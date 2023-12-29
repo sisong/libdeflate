@@ -669,12 +669,19 @@ struct libdeflate_decompressor {
 	/* used only during build_decode_table() */
 	u16 sorted_syms[DEFLATE_MAX_NUM_SYMS];
 
+    u32         bitsleft_back;
+	bitbuf_t    bitbuf_back;
 	bool static_codes_loaded;
 	unsigned litlen_tablebits;
 
 	/* The free() function for this struct, chosen at allocation time */
 	free_func_t free_func;
 };
+
+static forceinline void _decompress_block_reset(struct libdeflate_decompressor* d){
+	d->bitbuf_back=0;
+	d->bitsleft_back=0;
+}
 
 /*
  * Build a table for fast decoding of symbols from a Huffman code.  As input,
@@ -1131,6 +1138,11 @@ libdeflate_deflate_decompress_block(struct libdeflate_decompressor *d,
 	return decompress_impl(d, in_part, in_part_nbytes_bound, in_is_end_part!=0,
 						   out_block_with_in_dict, in_dict_nbytes, out_block_nbytes,
 						   actual_in_nbytes_ret, actual_out_nbytes_ret);
+}
+
+LIBDEFLATEAPI void
+libdeflate_deflate_decompress_block_reset(struct libdeflate_decompressor *d){
+    _decompress_block_reset(d);
 }
 
 /*

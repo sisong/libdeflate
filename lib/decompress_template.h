@@ -47,7 +47,7 @@ FUNCNAME(struct libdeflate_decompressor * restrict d,
 	 void * restrict out, size_t in_dict_nbytes, size_t out_nbytes_avail,
 	 size_t *actual_in_nbytes_ret, size_t *actual_out_nbytes_ret)
 {
-	u8 *out_next = out;
+	u8 *out_next = ((u8 *)out)+in_dict_nbytes;
 	u8 * const out_end = out_next + out_nbytes_avail;
 	u8 * const out_fastloop_end =
 		out_end - MIN(out_nbytes_avail, FASTLOOP_MAX_BYTES_WRITTEN);
@@ -57,9 +57,9 @@ FUNCNAME(struct libdeflate_decompressor * restrict d,
 	const u8 * const in_end = in_next + in_nbytes;
 	const u8 * const in_fastloop_end =
 		in_end - MIN(in_nbytes, FASTLOOP_MAX_BYTES_READ);
-	bitbuf_t bitbuf = 0;
+	bitbuf_t bitbuf = d->bitbuf_back;
 	bitbuf_t saved_bitbuf;
-	u32 bitsleft = 0;
+	u32 bitsleft = d->bitsleft_back;
 	size_t overread_count = 0;
 
 	bool is_final_block;
@@ -68,6 +68,8 @@ FUNCNAME(struct libdeflate_decompressor * restrict d,
 	unsigned num_offset_syms;
 	bitbuf_t litlen_tablemask;
 	u32 entry;
+
+	_decompress_block_reset(d);
 
 next_block:
 	/* Starting to read the next block */
@@ -740,8 +742,13 @@ generic_loop:
 block_done:
 	/* Finished decoding a block */
 
-	if (!is_final_block)
-		goto next_block;
+	if (in_is_end_part){
+		if (!is_final_block)
+			goto next_block;
+	}else{
+		if (out_next<out_end)
+			goto next_block;
+	}
 
 	/* That was the last block. */
 
@@ -759,11 +766,16 @@ block_done:
 		in_next -= (bitsleft >> 3) - overread_count;
 
 		*actual_in_nbytes_ret = in_next - (u8 *)in;
+
+		if (!in_is_end_part){//backup for next block
+			d->bitsleft_back=bitsleft&7;
+			d->bitbuf_back=bitbuf&((1<<(bitsleft&7))-1);
+		}
 	}
 
 	/* Optionally return the actual number of bytes written. */
 	if (actual_out_nbytes_ret) {
-		*actual_out_nbytes_ret = out_next - (u8 *)out;
+		*actual_out_nbytes_ret = out_next - (((u8 *)out)+in_dict_nbytes);
 	} else {
 		if (out_next != out_end)
 			return LIBDEFLATE_SHORT_OUTPUT;
