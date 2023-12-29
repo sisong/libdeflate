@@ -74,7 +74,7 @@ ht_matchfinder_slide_window(struct ht_matchfinder *mf)
 }
 
 /* Note: max_len must be >= HT_MATCHFINDER_REQUIRED_NBYTES */
-static u32
+static forceinline u32
 ht_matchfinder_longest_match(struct ht_matchfinder * const mf,
 			     const u8 ** const in_base_p,
 			     const u8 * const in_next,
@@ -218,8 +218,15 @@ ht_matchfinder_skip_bytes(struct ht_matchfinder * const mf,
 
 	hash = *next_hash;
 	do {
+
+#if HT_MATCHFINDER_BUCKET_SIZE == 1
+#elif HT_MATCHFINDER_BUCKET_SIZE == 2
+		mf->hash_tab[hash][1] = mf->hash_tab[hash][0];
+#else 
+	/* Generic version for HT_MATCHFINDER_BUCKET_SIZE > 2 */
 		for (i = HT_MATCHFINDER_BUCKET_SIZE - 1; i > 0; i--)
 			mf->hash_tab[hash][i] = mf->hash_tab[hash][i - 1];
+#endif
 		mf->hash_tab[hash][0] = cur_pos;
 
 		hash = lz_hash(get_unaligned_le32(++in_next),

@@ -470,8 +470,8 @@ struct libdeflate_compressor {
 	/* The compression level with which this compressor was created */
 	unsigned compression_level;
 	bool     in_is_end_block;
-	bitbuf_t bitbuf_back_for_block;
 	unsigned bitcount_back_for_block;
+	bitbuf_t bitbuf_back_for_block;
 
 	/* Anything of this size or less we won't bother trying to compress. */
 	size_t max_passthrough_size;
@@ -2040,7 +2040,7 @@ out:
 	os->next = out_next;
 }
 
-static void
+static forceinline void
 deflate_finish_block(struct libdeflate_compressor *c,
 		     struct deflate_output_bitstream *os,
 		     const u8 *block_begin, u32 block_length,

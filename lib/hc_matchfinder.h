@@ -179,7 +179,7 @@ hc_matchfinder_slide_window(struct hc_matchfinder *mf)
  * Return the length of the match found, or 'best_len' if no match longer than
  * 'best_len' was found.
  */
-static u32
+static forceinline u32
 hc_matchfinder_longest_match(struct hc_matchfinder * const mf,
 			     const u8 ** const in_base_p,
 			     const u8 * const in_next,
