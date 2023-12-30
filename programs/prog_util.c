@@ -493,6 +493,25 @@ invalid:
 	return -1;
 }
 
+int parse_thread_num(const tchar *arg){
+	int num=0;
+	for (size_t i=0;arg[i]!=0;i++){
+		if (arg[i] < '0' || arg[i] > '9')
+			goto invalid;
+		if ((num==0)&&(i>0))		/* Don't allow arguments like "01" */
+			goto invalid;
+		num = (num * 10) + (arg[i] - '0');
+	}
+	if (num>256) num=256;
+	else if (num<=1) num=1;
+	return num;
+
+invalid:
+	msg("Invalid thread num: \"%"TS"\".  "
+	    "Must be an integer.", arg);
+	return 1;
+}
+
 /* Allocate a new DEFLATE compressor */
 struct libdeflate_compressor *
 alloc_compressor(int level)

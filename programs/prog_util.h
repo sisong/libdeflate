@@ -211,6 +211,7 @@ int full_write(struct file_stream *strm, const void *buf, size_t count);
 int xclose(struct file_stream *strm);
 
 int parse_compression_level(tchar opt_char, const tchar *arg);
+int parse_thread_num(const tchar *arg);
 
 struct libdeflate_compressor *alloc_compressor(int level);
 struct libdeflate_decompressor *alloc_decompressor(void);

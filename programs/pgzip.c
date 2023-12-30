@@ -1,5 +1,6 @@
 /*
- * gzip.c - a file compression and decompression program
+ * pgzip.c - a file compression and decompression program
+ * added compression by stream & muti-thread parallel, 2023 housisong
  *
  * Copyright 2016 Eric Biggers
  *
@@ -26,6 +27,7 @@
  */
 
 #include "prog_util.h"
+#include "do_compress_by_stream_mt.h"
 
 #include <errno.h>
 #include <sys/stat.h>
@@ -50,16 +52,17 @@ struct options {
 	bool keep;
 	bool test;
 	int compression_level;
+	int thread_num;
 	const tchar *suffix;
 };
 
-static const tchar *const optstring = T("1::2::3::4::5::6::7::8::9::cdfhknqS:tV");
+static const tchar *const optstring = T("1::2::3::4::5::6::7::8::9::cdfhknqS:p:tV");
 
 static void
 show_usage(FILE *fp)
 {
 	fprintf(fp,
-"Usage: %"TS" [-LEVEL] [-cdfhkqtV] [-S SUF] FILE...\n"
+"Usage: %"TS" [-LEVEL] [-cdfhkqtV] [-S SUF] [-p NUM] FILE...\n"
 "Compress or decompress the specified FILEs.\n"
 "\n"
 "Options:\n"
@@ -68,6 +71,7 @@ show_usage(FILE *fp)
 "  -12       slowest (best) compression\n"
 "  -c        write to standard output\n"
 "  -d        decompress\n"
+"  -p NUM    default NUM is 4, open multi-thread Parallel mode when compress;\n"
 "  -f        overwrite existing output files; (de)compress hard-linked files;\n"
 "            allow reading/writing compressed data from/to terminal;\n"
 "            with gunzip -c, pass through non-gzipped data\n"
@@ -84,8 +88,9 @@ static void
 show_version(void)
 {
 	printf(
-"gzip compression program v" LIBDEFLATE_VERSION_STRING "\n"
+"pgzip compression program v" LIBDEFLATE_VERSION_STRING "\n"
 "Copyright 2016 Eric Biggers\n"
+"added compression by stream & muti-thread parallel, 2023 housisong\n"
 "\n"
 "This program is free software which may be modified and/or redistributed\n"
 "under the terms of the MIT license.  There is NO WARRANTY, to the extent\n"
@@ -144,44 +149,6 @@ append_suffix(const tchar *path, const tchar *suffix)
 	tmemcpy(suffixed_path, path, path_len);
 	tmemcpy(&suffixed_path[path_len], suffix, suffix_len + 1);
 	return suffixed_path;
-}
-
-static int
-do_compress(struct libdeflate_compressor *compressor,
-	    struct file_stream *in, struct file_stream *out)
-{
-	const void *uncompressed_data = in->mmap_mem;
-	size_t uncompressed_size = in->mmap_size;
-	void *compressed_data;
-	size_t actual_compressed_size;
-	size_t max_compressed_size;
-	int ret;
-
-	max_compressed_size = libdeflate_gzip_compress_bound(compressor,
-							     uncompressed_size);
-	compressed_data = xmalloc(max_compressed_size);
-	if (compressed_data == NULL) {
-		msg("%"TS": file is probably too large to be processed by this "
-		    "program", in->name);
-		ret = -1;
-		goto out;
-	}
-
-	actual_compressed_size = libdeflate_gzip_compress(compressor,
-							  uncompressed_data,
-							  uncompressed_size,
-							  compressed_data,
-							  max_compressed_size);
-	if (actual_compressed_size == 0) {
-		msg("Bug in libdeflate_gzip_compress_bound()!");
-		ret = -1;
-		goto out;
-	}
-
-	ret = full_write(out, compressed_data, actual_compressed_size);
-out:
-	free(compressed_data);
-	return ret;
 }
 
 static int
@@ -520,12 +487,7 @@ compress_file(struct libdeflate_compressor *compressor, const tchar *path,
 		goto out_close_out;
 	}
 
-	/* TODO: need a streaming-friendly solution */
-	ret = map_file_contents(&in, stbuf.st_size);
-	if (ret != 0)
-		goto out_close_out;
-
-	ret = do_compress(compressor, &in, &out);
+	ret = do_compress_by_stream_mt(compressor,&in,stbuf.st_size,&out,options->thread_num);
 	if (ret != 0)
 		goto out_close_out;
 
@@ -564,6 +526,7 @@ tmain(int argc, tchar *argv[])
 	options.keep = false;
 	options.test = false;
 	options.compression_level = 6;
+	options.thread_num = 4;
 	options.suffix = T(".gz");
 
 	while ((opt_char = tgetopt(argc, argv, optstring)) != -1) {
@@ -614,6 +577,9 @@ tmain(int argc, tchar *argv[])
 				msg("invalid suffix");
 				return 1;
 			}
+			break;
+		case 'p':
+			options.thread_num=parse_thread_num(toptarg);
 			break;
 		case 't':
 			options.test = true;
