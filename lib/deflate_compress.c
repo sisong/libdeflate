@@ -4243,23 +4243,21 @@ libdeflate_deflate_compress_bound(struct libdeflate_compressor *c,
 
 
 static forceinline size_t
-_compress_bound_block(struct libdeflate_compressor *c,size_t _one_block){
-	return libdeflate_deflate_compress_bound(c,_one_block)+5;
+_compress_bound_block(size_t _one_block){
+	return libdeflate_deflate_compress_bound(NULL,_one_block)+5;
 }
 
 LIBDEFLATEAPI size_t
-libdeflate_deflate_compress_bound_block(struct libdeflate_compressor *c,
-				  size_t in_block_nbytes){
-	return _compress_bound_block(c,in_block_nbytes);
+libdeflate_deflate_compress_bound_block(size_t in_block_nbytes){
+	return _compress_bound_block(in_block_nbytes);
 }
 
 LIBDEFLATEAPI uint64_t
-libdeflate_deflate_compress_bound_blocks(struct libdeflate_compressor *c,
-				  uint64_t in_stream_nbytes,size_t in_block_nbytes){
+libdeflate_deflate_compress_bound_blocks(uint64_t in_stream_nbytes,size_t in_block_nbytes){
 	uint64_t min_blocks;
 	size_t   last_block_nbytes;
 	ASSERT(in_block_nbytes>0);
 	min_blocks=in_stream_nbytes/in_block_nbytes;
 	last_block_nbytes=in_stream_nbytes-in_block_nbytes*min_blocks;
-	return _compress_bound_block(c,in_block_nbytes)*min_blocks+_compress_bound_block(c,last_block_nbytes);
+	return _compress_bound_block(in_block_nbytes)*min_blocks+_compress_bound_block(last_block_nbytes);
 }

@@ -25,7 +25,7 @@ int do_compress_by_stream_mt(struct libdeflate_compressor *c,
     thread_num=(thread_num<=1)?1:thread_num;
     const int    is_byte_align = 0;
     uint32_t     in_crc=0;
-    const size_t block_bound=libdeflate_deflate_compress_bound_block(c,kBlockSize);
+    const size_t block_bound=libdeflate_deflate_compress_bound_block(kBlockSize);
     const size_t one_buf_size=(kDictSize+kBlockSize+block_bound+4096-1)/4096*4096;
     pmem=(u8*)malloc(one_buf_size*thread_num);
     _check(pmem, 21);
