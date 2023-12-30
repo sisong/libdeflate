@@ -446,7 +446,7 @@ out_free_paths:
 }
 
 static int
-compress_file(struct libdeflate_compressor *compressor, const tchar *path,
+compress_file(int compression_level, const tchar *path,
 	      const struct options *options)
 {
 	tchar *newpath = NULL;
@@ -487,7 +487,7 @@ compress_file(struct libdeflate_compressor *compressor, const tchar *path,
 		goto out_close_out;
 	}
 
-	ret = do_compress_by_stream_mt(compressor,&in,stbuf.st_size,&out,options->thread_num);
+	ret = do_compress_by_stream_mt(compression_level,&in,stbuf.st_size,&out,options->thread_num);
 	if (ret != 0)
 		goto out_close_out;
 
@@ -628,14 +628,8 @@ tmain(int argc, tchar *argv[])
 	} else {
 		struct libdeflate_compressor *c;
 
-		c = alloc_compressor(options.compression_level);
-		if (c == NULL)
-			return 1;
-
 		for (i = 0; i < argc; i++)
-			ret |= -compress_file(c, argv[i], &options);
-
-		libdeflate_free_compressor(c);
+			ret |= -compress_file(options.compression_level, argv[i], &options);
 	}
 
 	switch (ret) {
