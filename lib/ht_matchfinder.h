@@ -205,7 +205,6 @@ ht_matchfinder_skip_bytes(struct ht_matchfinder * const mf,
 	s32 cur_pos = in_next - *in_base_p;
 	u32 hash;
 	u32 remaining = count;
-	int i;
 
 	if (unlikely(count + HT_MATCHFINDER_REQUIRED_NBYTES > in_end - in_next))
 		return;

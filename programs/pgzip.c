@@ -626,8 +626,6 @@ tmain(int argc, tchar *argv[])
 
 		libdeflate_free_decompressor(d);
 	} else {
-		struct libdeflate_compressor *c;
-
 		for (i = 0; i < argc; i++)
 			ret |= -compress_file(options.compression_level, argv[i], &options);
 	}

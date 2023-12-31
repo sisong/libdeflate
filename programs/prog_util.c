@@ -495,6 +495,7 @@ invalid:
 
 int parse_thread_num(const tchar *arg){
 	int num=0;
+	if (arg[0]=='-') ++arg;// allow -p-num
 	for (size_t i=0;arg[i]!=0;i++){
 		if (arg[i] < '0' || arg[i] > '9')
 			goto invalid;
