@@ -10,8 +10,6 @@ extern "C" {
 #include "prog_util.h"
 
 static const size_t kLibDefBlockSize = 1024*1024*1;
-static const size_t kLibDefBlockSize_max = 1024*1024*128; //for decompressor
-
 
 int do_compress_by_stream_mt(int compression_level,struct file_stream *in,u64 in_size,
                             struct file_stream *out,int thread_num);

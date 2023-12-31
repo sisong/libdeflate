@@ -41,11 +41,22 @@
 #  define EXTRACT_VARBITS8(word, count)	((word) & BITMASK((u8)(count)))
 #endif
 
+#define _DEF_bitstream_byte_restore() do{	\
+		bitsleft = (u8)bitsleft;			\
+		SAFETY_CHECK(overread_count <= (bitsleft >> 3));	\
+		in_next -= (bitsleft >> 3) - overread_count; } while(0)
+#define _DEF_bitstream_byte_align() do{	\
+		_DEF_bitstream_byte_restore();  \
+		overread_count = 0;	\
+		bitbuf = 0;			\
+		bitsleft = 0; } while(0)
+
 static enum libdeflate_result ATTRIBUTES MAYBE_UNUSED
 FUNCNAME(struct libdeflate_decompressor * restrict d,
-	 const void * restrict in, size_t in_nbytes, bool in_is_end_part,
+	 const void * restrict in, size_t in_nbytes,
 	 void * restrict out, size_t in_dict_nbytes, size_t out_nbytes_avail,
-	 size_t *actual_in_nbytes_ret, size_t *actual_out_nbytes_ret)
+	 size_t *actual_in_nbytes_ret, size_t *actual_out_nbytes_ret,
+	 enum libdeflate_decompress_stop_by stop_type)
 {
 	u8 *out_next = ((u8 *)out)+in_dict_nbytes;
 	u8 * const out_end = out_next + out_nbytes_avail;
@@ -263,12 +274,7 @@ next_block:
 		 * that have been refilled but not actually consumed yet (not
 		 * counting overread bytes, which don't increment 'in_next').
 		 */
-		bitsleft = (u8)bitsleft;
-		SAFETY_CHECK(overread_count <= (bitsleft >> 3));
-		in_next -= (bitsleft >> 3) - overread_count;
-		overread_count = 0;
-		bitbuf = 0;
-		bitsleft = 0;
+		_DEF_bitstream_byte_align();
 
 		SAFETY_CHECK(in_end - in_next >= 4);
 		len = get_unaligned_le16(in_next);
@@ -741,36 +747,43 @@ generic_loop:
 
 block_done:
 	/* Finished decoding a block */
+	if (is_final_block)
+		_DEF_bitstream_byte_align();
 
-	if (in_is_end_part){
-		if (!is_final_block)
-			goto next_block;
-	}else{
-		if (out_next<out_end)
-			goto next_block;
+	switch (stop_type){
+		case LIBDEFLATE_STOP_BY_FINAL_BLOCK:{
+			if (!is_final_block)
+				goto next_block;
+		} break;
+		case LIBDEFLATE_STOP_BY_ANY_BLOCK:{
+			// stop, not next block
+		} break;
+		case LIBDEFLATE_STOP_BY_ANY_BLOCK_AND_FULL_INPUT:{
+			if (in_next-((((u8)bitsleft)>>3)-overread_count)<in_end)
+				goto next_block;
+		} break;
+		case LIBDEFLATE_STOP_BY_ANY_BLOCK_AND_FULL_OUTPUT:{
+			if (out_next<out_end)
+				goto next_block;
+		} break;
+		case LIBDEFLATE_STOP_BY_FINAL_BLOCK_OR_HALF_OUTPUT:{
+			const size_t full_out_nbytes=out_end-((u8 *)out)-in_dict_nbytes;
+			if ((!is_final_block)&&((size_t)(out_end-out_next)<(full_out_nbytes>>1)))
+				goto next_block;
+		} break;
 	}
 
 	/* That was the last block. */
-
-	bitsleft = (u8)bitsleft;
-
-	/*
-	 * If any of the implicit appended zero bytes were consumed (not just
-	 * refilled) before hitting end of stream, then the data is bad.
-	 */
-	SAFETY_CHECK(overread_count <= (bitsleft >> 3));
+	if (!is_final_block){
+		_DEF_bitstream_byte_restore();
+		//backup for next block
+		d->bitsleft_back=bitsleft&7;
+		d->bitbuf_back=bitbuf&((1<<(bitsleft&7))-1);
+	}
 
 	/* Optionally return the actual number of bytes consumed. */
 	if (actual_in_nbytes_ret) {
-		/* Don't count bytes that were refilled but not consumed. */
-		in_next -= (bitsleft >> 3) - overread_count;
-
 		*actual_in_nbytes_ret = in_next - (u8 *)in;
-
-		if (!in_is_end_part){//backup for next block
-			d->bitsleft_back=bitsleft&7;
-			d->bitbuf_back=bitbuf&((1<<(bitsleft&7))-1);
-		}
 	}
 
 	/* Optionally return the actual number of bytes written. */
