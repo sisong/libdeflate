@@ -1,18 +1,18 @@
 /*
- * do_compress_by_stream_mt.cpp
- * added compression by stream & muti-thread parallel, 2023 housisong
+ * gzip_compress_by_stream_mt.cpp
+ * added compress by stream & muti-thread parallel, 2023 housisong
  */
 #include <vector>
 #include <thread>
 #include <mutex>
-#include "do_compress_by_stream_mt.h"
+#include "gzip_compress_by_stream_mt.h"
 #include <assert.h>
 namespace {
 
 static const size_t kDictSize  = (1<<15); //MATCHFINDER_WINDOW_SIZE
-#define kBlockSize kLibDefBlockSize
+#define kBlockSize kCompressSteamStepSize
 #define _check(v,_ret_errCode) do { if (!(v)) {err_code=_ret_errCode; goto _out; } } while (0)
-static inline size_t _dictSize_avail(u64 in_read_pos) { return (in_read_pos<kDictSize)?in_read_pos:kDictSize; }
+static inline size_t _dictSize_avail(u64 uncompressed_pos) { return (uncompressed_pos<kDictSize)?uncompressed_pos:kDictSize; }
 
 //muti-thread
 
@@ -222,16 +222,15 @@ static void _compress_blocks_mt(TThreadData* td,size_t thread_num,u8* pmem,size_
 
 } //namespace
 
-int do_compress_by_stream_mt(int compression_level,struct file_stream *in,u64 in_size,
+int gzip_compress_by_stream_mt(int compression_level,struct file_stream *in,u64 in_size,
                             struct file_stream *out,int thread_num){
-    if (in_size==0) return 0; //ok
     int err_code=0;
     u8* pmem=0;
     struct libdeflate_compressor** c_list=0;
     uint32_t     in_crc=0;
     const s64 _allWorkCount=(in_size+kBlockSize-1)/kBlockSize;
     thread_num=(thread_num<=1)?1:((thread_num<_allWorkCount)?thread_num:_allWorkCount);
-    size_t workBufCount=(thread_num<=1)?1:(thread_num+(thread_num-1)/1+1);
+    size_t workBufCount=(thread_num<=1)?1:(thread_num+(thread_num-1)/2+1);
     workBufCount=(workBufCount<_allWorkCount)?workBufCount:_allWorkCount;
     const size_t block_bound=libdeflate_deflate_compress_bound_block(kBlockSize);
     size_t one_buf_size=kDictSize+kBlockSize+block_bound;

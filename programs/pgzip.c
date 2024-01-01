@@ -27,7 +27,7 @@
  */
 
 #include "prog_util.h"
-#include "do_compress_by_stream_mt.h"
+#include "gzip_compress_by_stream_mt.h"
 
 #include <errno.h>
 #include <sys/stat.h>
@@ -487,7 +487,7 @@ compress_file(int compression_level, const tchar *path,
 		goto out_close_out;
 	}
 
-	ret = do_compress_by_stream_mt(compression_level,&in,stbuf.st_size,&out,options->thread_num);
+	ret = gzip_compress_by_stream_mt(compression_level,&in,stbuf.st_size,&out,options->thread_num);
 	if (ret != 0)
 		goto out_close_out;
 
