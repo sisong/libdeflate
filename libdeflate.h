@@ -152,13 +152,6 @@ libdeflate_gzip_compress(struct libdeflate_compressor *compressor,
 			 void *out, size_t out_nbytes_avail);
 
 
-LIBDEFLATEAPI size_t
-libdeflate_gzip_compress_head(unsigned compression_level,size_t in_nbytes,
-			 void *out, size_t out_nbytes_avail);
-LIBDEFLATEAPI size_t
-libdeflate_gzip_compress_foot(uint32_t in_crc, size_t in_nbytes,
-			 void *out, size_t out_nbytes_avail);
-
 /*
  * Like libdeflate_deflate_compress_bound(), but assumes the data will be
  * compressed with libdeflate_gzip_compress() rather than with

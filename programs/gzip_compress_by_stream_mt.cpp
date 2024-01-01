@@ -5,6 +5,7 @@
 #include <vector>
 #include <thread>
 #include <mutex>
+#include "../lib/gzip_overhead.h"
 #include "gzip_compress_by_stream_mt.h"
 #include <assert.h>
 namespace {
@@ -244,7 +245,7 @@ int gzip_compress_by_stream_mt(int compression_level,struct file_stream *in,u64 
         _check(c_list[i]!=0, 13);
     }
 
-    {//gizp head
+    {//gzip head
         size_t code_nbytes=libdeflate_gzip_compress_head(compression_level,in_size,pmem,block_bound);
         _check(code_nbytes>0, 21);
         int w_ret=full_write(out,pmem,code_nbytes);
@@ -287,7 +288,7 @@ int gzip_compress_by_stream_mt(int compression_level,struct file_stream *in,u64 
         err_code=threadData.err_code;
     }
     
-    {//gizp foot
+    {//gzip foot
         size_t code_nbytes=libdeflate_gzip_compress_foot(in_crc,in_size,pmem,block_bound);
         _check(code_nbytes>0, 23);
         int w_ret=full_write(out,pmem,code_nbytes);

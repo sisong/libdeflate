@@ -678,7 +678,7 @@ struct libdeflate_decompressor {
 	free_func_t free_func;
 };
 
-static forceinline void _decompress_block_reset(struct libdeflate_decompressor* d){
+static forceinline void _decompress_block_init(struct libdeflate_decompressor* d){
 	d->bitbuf_back=0;
 	d->bitsleft_back=0;
 }
@@ -1146,7 +1146,7 @@ libdeflate_deflate_decompress_block(struct libdeflate_decompressor *d,
 
 LIBDEFLATEAPI void
 libdeflate_deflate_decompress_block_reset(struct libdeflate_decompressor *d){
-    _decompress_block_reset(d);
+    _decompress_block_init(d);
 }
 
 /*
@@ -1164,6 +1164,7 @@ libdeflate_deflate_decompress_ex(struct libdeflate_decompressor *d,
 				 size_t *actual_in_nbytes_ret,
 				 size_t *actual_out_nbytes_ret)
 {
+	_decompress_block_init(d);
 	return decompress_impl(d,in,in_nbytes,out,0,out_nbytes_avail,
 						   actual_in_nbytes_ret,actual_out_nbytes_ret,LIBDEFLATE_STOP_BY_FINAL_BLOCK);
 }
@@ -1174,6 +1175,7 @@ libdeflate_deflate_decompress(struct libdeflate_decompressor *d,
 			      void *out, size_t out_nbytes_avail,
 			      size_t *actual_out_nbytes_ret)
 {
+	_decompress_block_init(d);
 	return decompress_impl(d,in,in_nbytes,out,0,out_nbytes_avail,
 						   NULL,actual_out_nbytes_ret,LIBDEFLATE_STOP_BY_FINAL_BLOCK);
 }

@@ -671,6 +671,11 @@ struct libdeflate_compressor {
 	} p; /* (p)arser */
 };
 
+static forceinline void _compress_block_init(struct libdeflate_compressor* c){
+	c->bitbuf_back_for_block=0;
+	c->bitcount_back_for_block=0;
+}
+
 /*
  * The capacity of the bitbuffer, in bits.  This is 1 less than the real size,
  * in order to avoid undefined behavior when doing bitbuf >>= bitcount & ~7.
@@ -3959,8 +3964,7 @@ libdeflate_alloc_compressor_ex(int compression_level,
 
 	c->compression_level = compression_level;
 	c->in_is_end_block = false;
-	c->bitbuf_back_for_block=0;
-	c->bitcount_back_for_block=0;
+	_compress_block_init(c);
 
 	/*
 	 * The higher the compression level, the more we should bother trying to
@@ -4076,6 +4080,7 @@ libdeflate_deflate_compress(struct libdeflate_compressor *c,
 			    const void *in, size_t in_nbytes,
 			    void *out, size_t out_nbytes_avail)
 {
+	_compress_block_init(c);
 	return libdeflate_deflate_compress_block(c,in,0,in_nbytes,true,out,out_nbytes_avail,false);
 }
 
@@ -4127,8 +4132,8 @@ libdeflate_deflate_compress_block(struct libdeflate_compressor *c,
 	c->in_is_end_block=(in_is_end_block!=0);
 	os.bitbuf = c->bitbuf_back_for_block;
 	os.bitcount = c->bitcount_back_for_block;
-	c->bitbuf_back_for_block=0;
-	c->bitcount_back_for_block=0;
+	_compress_block_init(c);
+
 	if (unlikely(dict_nbytes>MATCHFINDER_WINDOW_SIZE)){
 		in_block_with_dict=((const u8*)in_block_with_dict)+dict_nbytes-MATCHFINDER_WINDOW_SIZE;
 		dict_nbytes=MATCHFINDER_WINDOW_SIZE;

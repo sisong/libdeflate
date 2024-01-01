@@ -80,7 +80,7 @@ FUNCNAME(struct libdeflate_decompressor * restrict d,
 	bitbuf_t litlen_tablemask;
 	u32 entry;
 
-	_decompress_block_reset(d);
+	_decompress_block_init(d);
 
 next_block:
 	/* Starting to read the next block */
