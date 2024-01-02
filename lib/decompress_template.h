@@ -55,8 +55,8 @@ static enum libdeflate_result ATTRIBUTES MAYBE_UNUSED
 FUNCNAME(struct libdeflate_decompressor * restrict d,
 	 const void * restrict in, size_t in_nbytes,
 	 void * restrict out, size_t in_dict_nbytes, size_t out_nbytes_avail,
-	 size_t *actual_in_nbytes_ret, size_t *actual_out_nbytes_ret,
-	 enum libdeflate_decompress_stop_by stop_type)
+	 size_t *actual_in_nbytes_ret,size_t *actual_out_nbytes_ret,
+	 enum libdeflate_decompress_stop_by stop_type,int* is_final_block_ret)
 {
 	u8 *out_next = ((u8 *)out)+in_dict_nbytes;
 	u8 * const out_end = out_next + out_nbytes_avail;
@@ -766,14 +766,11 @@ block_done:
 			if (out_next<out_end)
 				goto next_block;
 		} break;
-		case LIBDEFLATE_STOP_BY_FINAL_BLOCK_OR_HALF_OUTPUT:{
-			const size_t full_out_nbytes=out_end-((u8 *)out)-in_dict_nbytes;
-			if ((!is_final_block)&&((size_t)(out_end-out_next)<(full_out_nbytes>>1)))
-				goto next_block;
-		} break;
 	}
 
 	/* That was the last block. */
+	if (is_final_block_ret)
+		*is_final_block_ret=is_final_block;
 	if (!is_final_block){
 		_DEF_bitstream_byte_restore();
 		//backup for next block

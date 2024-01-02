@@ -274,7 +274,6 @@ enum libdeflate_decompress_stop_by {
 	LIBDEFLATE_STOP_BY_ANY_BLOCK                  = 1,
 	LIBDEFLATE_STOP_BY_ANY_BLOCK_AND_FULL_INPUT   = 2,
 	LIBDEFLATE_STOP_BY_ANY_BLOCK_AND_FULL_OUTPUT  = 3,
-	LIBDEFLATE_STOP_BY_FINAL_BLOCK_OR_HALF_OUTPUT = 4,
 };
 
 LIBDEFLATEAPI enum libdeflate_result
@@ -282,7 +281,7 @@ libdeflate_deflate_decompress_block(struct libdeflate_decompressor *decompressor
 				 const void *in_part, size_t in_part_nbytes_bound,
 				 void *out_block_with_in_dict,size_t in_dict_nbytes, size_t out_block_nbytes,
 				 size_t *actual_in_nbytes_ret,size_t *actual_out_nbytes_ret,
-				 enum libdeflate_decompress_stop_by stop_type);
+				 enum libdeflate_decompress_stop_by stop_type,int* is_final_block_ret);
 
 LIBDEFLATEAPI void
 libdeflate_deflate_decompress_block_reset(struct libdeflate_decompressor *decompressor);

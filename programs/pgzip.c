@@ -28,6 +28,7 @@
 
 #include "prog_util.h"
 #include "gzip_compress_by_stream_mt.h"
+#include "gzip_decompress_by_stream.h"
 
 #include <errno.h>
 #include <sys/stat.h>
@@ -415,12 +416,25 @@ decompress_file(struct libdeflate_decompressor *decompressor, const tchar *path,
 	if (ret != 0)
 		goto out_close_in;
 
-	/* TODO: need a streaming-friendly solution */
-	ret = map_file_contents(&in, stbuf.st_size);
-	if (ret != 0)
-		goto out_close_out;
+    ret = gzip_decompress_by_stream(decompressor, &in, stbuf.st_size, (options->test?0:&out), NULL, NULL);
+    if (ret==LIBDEFLATE_INSUFFICIENT_SPACE){
+        msg("decompress gzip by stream fail, deflate block size too large! try decompress in memory...\n");
+		if (lseek(in.fd,0,SEEK_SET)<0){
+			ret = -1;
+			goto out_close_out;
+		}
+		if (!options->test){
+			if (lseek(out.fd,0,SEEK_SET)<0){
+				ret = -1;
+				goto out_close_out;
+			}
+		}
 
-	ret = do_decompress(decompressor, &in, &out, options);
+		ret = map_file_contents(&in, stbuf.st_size);
+		if (ret != 0)
+			goto out_close_out;
+        ret=do_decompress(decompressor, &in, &out, options);
+    }
 	if (ret != 0)
 		goto out_close_out;
 
@@ -487,7 +501,7 @@ compress_file(int compression_level, const tchar *path,
 		goto out_close_out;
 	}
 
-	ret = gzip_compress_by_stream_mt(compression_level,&in,stbuf.st_size,&out,options->thread_num);
+	ret = gzip_compress_by_stream_mt(compression_level,&in,stbuf.st_size,&out,options->thread_num, NULL);
 	if (ret != 0)
 		goto out_close_out;
 

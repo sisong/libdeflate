@@ -13,7 +13,8 @@ namespace {
 static const size_t kDictSize  = (1<<15); //MATCHFINDER_WINDOW_SIZE
 #define kBlockSize kCompressSteamStepSize
 #define _check(v,_ret_errCode) do { if (!(v)) {err_code=_ret_errCode; goto _out; } } while (0)
-static inline size_t _dictSize_avail(u64 uncompressed_pos) { return (uncompressed_pos<kDictSize)?uncompressed_pos:kDictSize; }
+static inline size_t _dictSize_avail(u64 uncompressed_pos) {
+                        return (uncompressed_pos<kDictSize)?(size_t)uncompressed_pos:kDictSize; }
 
 //muti-thread
 
@@ -34,6 +35,7 @@ struct TThreadData{
     struct file_stream* in;
     u64                 in_size;
     struct file_stream* out;
+    u64                 out_cur;
     int                 err_code;
 
     u64                 _in_cur;
@@ -104,7 +106,8 @@ struct TThreadData{
                     assert(in_cur_writed_end==nodes->in_cur);
                     const u8* pcode=nodes->buf+nodes->dict_size+nodes->in_nbytes;
                     int w_ret=full_write(td->out,pcode,nodes->code_nbytes);
-                    _check(w_ret==0, 51);
+                    _check(w_ret==0, LIBDEFLATE_ENSTREAM_MT_WRITE_FILE_ERROR);
+                    td->out_cur+=nodes->code_nbytes;
 
                     in_cur_writed_end=nodes->in_cur+nodes->in_nbytes;
                     nodes=nodes->next;
@@ -138,7 +141,7 @@ struct TThreadData{
 
             //read block data
             ssize_t r_len=xread(td->in,node->buf+node->dict_size,node->in_nbytes);
-            _check(r_len==node->in_nbytes, 52);
+            _check(r_len==node->in_nbytes, LIBDEFLATE_ENSTREAM_MT_READ_FILE_ERROR);
             td->in_crc=libdeflate_crc32(td->in_crc,node->buf+node->dict_size,node->in_nbytes);
 
             //dict data for next block
@@ -185,13 +188,18 @@ static void _compress_blocks_thread(TThreadData* td,size_t thread_i){
     const int is_byte_align=1;
     struct libdeflate_compressor* c=td->c_list[thread_i];
     TWorkBuf* wbuf=0;
-    while (wbuf=_new_workBuf(td,wbuf)){
-        wbuf->code_nbytes=libdeflate_deflate_compress_block(c,wbuf->buf,wbuf->dict_size,wbuf->in_nbytes,wbuf->is_end_block,
-                                                        wbuf->buf+wbuf->dict_size+wbuf->in_nbytes,td->block_bound,is_byte_align);
-        if (wbuf->code_nbytes==0){
-            _update_err_code(td,41); //compress error
-            break;
+    try{
+        while (wbuf=_new_workBuf(td,wbuf)){
+            wbuf->code_nbytes=libdeflate_deflate_compress_block(c,wbuf->buf,wbuf->dict_size,wbuf->in_nbytes,
+                                                wbuf->is_end_block,wbuf->buf+wbuf->dict_size+wbuf->in_nbytes,
+                                                td->block_bound,is_byte_align);
+            if (wbuf->code_nbytes==0){
+                _update_err_code(td,LIBDEFLATE_ENSTREAM_MT_COMPRESS_BLOCK_ERROR); //compress error
+                break;
+            }
         }
+    }catch(...){
+        __do_update_err_code(td,LIBDEFLATE_ENSTREAM_MT_THREAD_EXCEPTION_ERROR);
     }
 }
 
@@ -215,41 +223,45 @@ static void _compress_blocks_mt(TThreadData* td,size_t thread_num,u8* pmem,size_
         for (size_t i=0;i<threads.size();i++)
             threads[i].join();
         if ((td->err_code==0)&&(td->_in_cur_writed_end!=td->in_size))
-            td->err_code=42;
+            td->err_code=LIBDEFLATE_ENSTREAM_MT_OUT_LACK_ERROR;
     }catch(...){
-        td->err_code=43;
+        td->err_code=LIBDEFLATE_ENSTREAM_MT_EXCEPTION_ERROR;
     }
 }
 
 } //namespace
 
 int gzip_compress_by_stream_mt(int compression_level,struct file_stream *in,u64 in_size,
-                            struct file_stream *out,int thread_num){
+                            struct file_stream *out,int thread_num,u64* actual_out_nbytes_ret){
     int err_code=0;
     u8* pmem=0;
     struct libdeflate_compressor** c_list=0;
     uint32_t     in_crc=0;
-    const s64 _allWorkCount=(in_size+kBlockSize-1)/kBlockSize;
+    u64 out_cur=0;
+    const u64 _allWorkCount=(in_size+kBlockSize-1)/kBlockSize;
     thread_num=(thread_num<=1)?1:((thread_num<_allWorkCount)?thread_num:_allWorkCount);
     size_t workBufCount=(thread_num<=1)?1:(thread_num+(thread_num-1)/2+1);
     workBufCount=(workBufCount<_allWorkCount)?workBufCount:_allWorkCount;
     const size_t block_bound=libdeflate_deflate_compress_bound_block(kBlockSize);
     size_t one_buf_size=kDictSize+kBlockSize+block_bound;
     one_buf_size=(thread_num<=1)?one_buf_size:(one_buf_size+sizeof(TWorkBuf)+256-1)/256*256;
-    pmem=(u8*)malloc(one_buf_size*workBufCount+((thread_num<=1)?0:kDictSize));
-    _check(pmem!=0, 11);
-    c_list=(struct libdeflate_compressor**)malloc(sizeof(struct libdeflate_compressor*)*thread_num);
-    _check(c_list!=0, 12);
+
+    size_t _sum_buf_size=one_buf_size*workBufCount + ((thread_num<=1)?0:kDictSize);
+    pmem=(u8*)malloc(_sum_buf_size + sizeof(struct libdeflate_compressor*)*thread_num );
+    _check(pmem!=0, LIBDEFLATE_ENSTREAM_MEM_ALLOC_ERROR);
+    c_list=(struct libdeflate_compressor**)(pmem+_sum_buf_size);
+    memset(c_list,0,sizeof(struct libdeflate_compressor*)*thread_num);
     for (size_t i=0; i<thread_num;i++){
         c_list[i]=libdeflate_alloc_compressor(compression_level);
-        _check(c_list[i]!=0, 13);
+        _check(c_list[i]!=0, LIBDEFLATE_ENSTREAM_ALLOC_COMPRESSOR_ERROR);
     }
 
     {//gzip head
         size_t code_nbytes=libdeflate_gzip_compress_head(compression_level,in_size,pmem,block_bound);
-        _check(code_nbytes>0, 21);
+        _check(code_nbytes>0, LIBDEFLATE_ENSTREAM_GZIP_HEAD_ERROR);
         int w_ret=full_write(out,pmem,code_nbytes);
-        _check(w_ret==0, 22);
+        _check(w_ret==0, LIBDEFLATE_ENSTREAM_WRITE_FILE_ERROR);
+        out_cur+=code_nbytes;
     }
 
     if (thread_num<=1){ // compress blocks single thread
@@ -264,17 +276,18 @@ int gzip_compress_by_stream_mt(int compression_level,struct file_stream *in,u64 
 
             //read block data
             ssize_t r_len=xread(in,pdata+dict_size,in_nbytes);
-            _check(r_len==in_nbytes, 31);
+            _check(r_len==in_nbytes, LIBDEFLATE_ENSTREAM_READ_FILE_ERROR);
             in_crc=libdeflate_crc32(in_crc,pdata+dict_size,in_nbytes);
 
             //compress the block
             size_t code_nbytes=libdeflate_deflate_compress_block(c,pdata,dict_size,in_nbytes,is_end_block,
                                                               pcode,block_bound,is_byte_align);
-            _check(code_nbytes>0, 32);
+            _check(code_nbytes>0, LIBDEFLATE_ENSTREAM_COMPRESS_BLOCK_ERROR);
 
             //write the block's code
             int w_ret=full_write(out,pcode,code_nbytes);
-            _check(w_ret==0, 33);
+            _check(w_ret==0, LIBDEFLATE_ENSTREAM_WRITE_FILE_ERROR);
+            out_cur+=code_nbytes;
 
             //dict data for next block
             in_cur+=in_nbytes;
@@ -282,24 +295,28 @@ int gzip_compress_by_stream_mt(int compression_level,struct file_stream *in,u64 
             memmove(pdata,pdata+dict_size+in_nbytes-nextDictSize,nextDictSize);
         }
     }else{ // compress blocks muti-thread
-        TThreadData threadData={c_list,in_crc,block_bound,in,in_size,out,err_code};
+        TThreadData threadData={c_list,in_crc,block_bound,in,in_size,out,out_cur,err_code};
         _compress_blocks_mt(&threadData,thread_num,pmem,one_buf_size,workBufCount);
         in_crc=threadData.in_crc;
+        out_cur=threadData.out_cur;
         err_code=threadData.err_code;
     }
     
     {//gzip foot
         size_t code_nbytes=libdeflate_gzip_compress_foot(in_crc,in_size,pmem,block_bound);
-        _check(code_nbytes>0, 23);
+        _check(code_nbytes>0, LIBDEFLATE_ENSTREAM_GZIP_FOOT_ERROR);
         int w_ret=full_write(out,pmem,code_nbytes);
-        _check(w_ret==0, 24);
+        _check(w_ret==0, LIBDEFLATE_ENSTREAM_WRITE_FILE_ERROR);
+        out_cur+=code_nbytes;
     }
+
+    if (actual_out_nbytes_ret)
+        *actual_out_nbytes_ret=out_cur;
 
 _out:
     if (c_list){
         for (size_t i=0; i<thread_num;i++)
             libdeflate_free_compressor(c_list[i]);
-        free(c_list);
     }
     if (pmem) free(pmem);
     return err_code;
