@@ -9,8 +9,6 @@ extern "C" {
 #endif
 #include "prog_util.h"
 
-static const size_t kCompressSteamStepSize = (size_t)1024*1024*2;
-
 enum libdeflate_enstream_result{
 	LIBDEFLATE_ENSTREAM_MEM_ALLOC_ERROR =30,
 	LIBDEFLATE_ENSTREAM_READ_FILE_ERROR,
@@ -30,7 +28,7 @@ enum libdeflate_enstream_result{
 //compress gzip by stream & muti-thread;
 //  actual_out_nbytes_ret can NULL
 //	return value is libdeflate_enstream_result
-int gzip_compress_by_stream_mt(int compression_level,struct file_stream *in,u64 in_size,
+int gzip_compress_by_stream_mt(int compression_level,struct file_stream *in,u64 in_size,size_t in_step_size,
                             struct file_stream *out,int thread_num,u64* actual_out_nbytes_ret);
 
 #ifdef __cplusplus

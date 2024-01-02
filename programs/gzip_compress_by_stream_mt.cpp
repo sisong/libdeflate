@@ -11,7 +11,6 @@
 namespace {
 
 static const size_t kDictSize  = (1<<15); //MATCHFINDER_WINDOW_SIZE
-#define kBlockSize kCompressSteamStepSize
 #define _check(v,_ret_errCode) do { if (!(v)) {err_code=_ret_errCode; goto _out; } } while (0)
 static inline size_t _dictSize_avail(u64 uncompressed_pos) {
                         return (uncompressed_pos<kDictSize)?(size_t)uncompressed_pos:kDictSize; }
@@ -30,6 +29,7 @@ static inline size_t _dictSize_avail(u64 uncompressed_pos) {
 
 struct TThreadData{
     struct libdeflate_compressor** c_list;
+    size_t              in_step_size;
     uint32_t            in_crc;
     size_t              block_bound;
     struct file_stream* in;
@@ -133,8 +133,8 @@ struct TThreadData{
         {
             std::lock_guard<std::mutex> _auto_locker(td->_lock_read);
             if (td->_in_cur==td->in_size) return 0;
-            node->is_end_block=(td->_in_cur+kBlockSize>=td->in_size);
-            node->in_nbytes=node->is_end_block?td->in_size-td->_in_cur:kBlockSize;
+            node->is_end_block=(td->_in_cur+td->in_step_size>=td->in_size);
+            node->in_nbytes=node->is_end_block?td->in_size-td->_in_cur:td->in_step_size;
             node->dict_size=_dictSize_avail(td->_in_cur);
             node->in_cur=td->_in_cur;
             memcpy(node->buf,td->_dictBuf,node->dict_size);
@@ -231,19 +231,19 @@ static void _compress_blocks_mt(TThreadData* td,size_t thread_num,u8* pmem,size_
 
 } //namespace
 
-int gzip_compress_by_stream_mt(int compression_level,struct file_stream *in,u64 in_size,
+int gzip_compress_by_stream_mt(int compression_level,struct file_stream *in,u64 in_size,size_t in_step_size,
                             struct file_stream *out,int thread_num,u64* actual_out_nbytes_ret){
     int err_code=0;
     u8* pmem=0;
     struct libdeflate_compressor** c_list=0;
     uint32_t     in_crc=0;
     u64 out_cur=0;
-    const u64 _allWorkCount=(in_size+kBlockSize-1)/kBlockSize;
+    const u64 _allWorkCount=(in_size+in_step_size-1)/in_step_size;
     thread_num=(thread_num<=1)?1:((thread_num<_allWorkCount)?thread_num:_allWorkCount);
     size_t workBufCount=(thread_num<=1)?1:(thread_num+(thread_num-1)/2+1);
     workBufCount=(workBufCount<_allWorkCount)?workBufCount:_allWorkCount;
-    const size_t block_bound=libdeflate_deflate_compress_bound_block(kBlockSize);
-    size_t one_buf_size=kDictSize+kBlockSize+block_bound;
+    const size_t block_bound=libdeflate_deflate_compress_bound_block(in_step_size);
+    size_t one_buf_size=kDictSize+in_step_size+block_bound;
     one_buf_size=(thread_num<=1)?one_buf_size:(one_buf_size+sizeof(TWorkBuf)+256-1)/256*256;
 
     size_t _sum_buf_size=one_buf_size*workBufCount + ((thread_num<=1)?0:kDictSize);
@@ -267,11 +267,11 @@ int gzip_compress_by_stream_mt(int compression_level,struct file_stream *in,u64 
     if (thread_num<=1){ // compress blocks single thread
         const int is_byte_align = 0;
         u8* pdata=pmem;
-        u8* pcode=pdata+kDictSize+kBlockSize;
+        u8* pcode=pdata+kDictSize+in_step_size;
         struct libdeflate_compressor* c=c_list[0];
         for (u64 in_cur=0;in_cur<in_size;){//compress by stream
-            bool is_end_block=(in_cur+kBlockSize>=in_size);
-            size_t in_nbytes=is_end_block?in_size-in_cur:kBlockSize;
+            bool is_end_block=(in_cur+in_step_size>=in_size);
+            size_t in_nbytes=is_end_block?in_size-in_cur:in_step_size;
             size_t dict_size=_dictSize_avail(in_cur);
 
             //read block data
@@ -295,7 +295,7 @@ int gzip_compress_by_stream_mt(int compression_level,struct file_stream *in,u64 
             memmove(pdata,pdata+dict_size+in_nbytes-nextDictSize,nextDictSize);
         }
     }else{ // compress blocks muti-thread
-        TThreadData threadData={c_list,in_crc,block_bound,in,in_size,out,out_cur,err_code};
+        TThreadData threadData={c_list,in_step_size,in_crc,block_bound,in,in_size,out,out_cur,err_code};
         _compress_blocks_mt(&threadData,thread_num,pmem,one_buf_size,workBufCount);
         in_crc=threadData.in_crc;
         out_cur=threadData.out_cur;

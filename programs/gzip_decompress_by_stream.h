@@ -17,13 +17,11 @@ enum libdeflate_destream_result{
 	LIBDEFLATE_DESTREAM_DATA_SIZE_ERROR,
 };
 
-static const size_t kMaxDeflateBlockSize = (size_t)1024*1024*8; 
-
 //decompress gzip by stream
-//  only support max deflate block size <= kMaxDeflateBlockSize
+//  only support max deflate block size <= maxDeflateBlockSize
 //  out,actual_in_nbytes_ret,actual_out_nbytes_ret can NULL
 //	return value is libdeflate_result or libdeflate_destream_result
-int gzip_decompress_by_stream(struct libdeflate_decompressor *decompressor,
+int gzip_decompress_by_stream(struct libdeflate_decompressor *decompressor,size_t maxDeflateBlockSize,
 	                        struct file_stream *in, u64 in_size, struct file_stream *out,
 							u64* actual_in_nbytes_ret,u64* actual_out_nbytes_ret);
 

@@ -26,10 +26,9 @@ static inline size_t _dictSize_avail(u64 uncompressed_pos) {
     in_cur+=read_len;               \
 } while(0)
 
-int gzip_decompress_by_stream(struct libdeflate_decompressor *d,
+int gzip_decompress_by_stream(struct libdeflate_decompressor *d,size_t curBlockSize,
 	                        struct file_stream *in, u64 in_size,struct file_stream *out,
 							u64* _actual_in_nbytes_ret,u64* _actual_out_nbytes_ret){
-    const size_t curBlockSize=kMaxDeflateBlockSize;
     int err_code=0;
     u8* pmem=0;
     u8* code_buf;
@@ -72,7 +71,7 @@ int gzip_decompress_by_stream(struct libdeflate_decompressor *d,
 
         if (is_final_block_ret||(data_cur>curBlockSize+kDictSize)){//save data to out file
             if (out)
-                _check(full_write(out,data_buf+kDictSize,data_cur-kDictSize), LIBDEFLATE_DESTREAM_WRITE_FILE_ERROR);
+                _check(0==full_write(out,data_buf+kDictSize,data_cur-kDictSize), LIBDEFLATE_DESTREAM_WRITE_FILE_ERROR);
             data_crc=libdeflate_crc32(data_crc,data_buf+kDictSize,data_cur-kDictSize);
             out_cur+=data_cur-kDictSize;
             dict_size=_dictSize_avail(out_cur);

@@ -40,6 +40,9 @@
 #  include <utime.h>
 #endif
 
+static const size_t kCompressSteamStepSize = (size_t)1024*1024*2;
+static const size_t kMaxDeflateBlockSize   = (size_t)1024*1024*8; 
+
 #define GZIP_MIN_HEADER_SIZE	10
 #define GZIP_FOOTER_SIZE	8
 #define GZIP_MIN_OVERHEAD	(GZIP_MIN_HEADER_SIZE + GZIP_FOOTER_SIZE)
@@ -416,7 +419,8 @@ decompress_file(struct libdeflate_decompressor *decompressor, const tchar *path,
 	if (ret != 0)
 		goto out_close_in;
 
-    ret = gzip_decompress_by_stream(decompressor, &in, stbuf.st_size, (options->test?0:&out), NULL, NULL);
+    ret = gzip_decompress_by_stream(decompressor, kMaxDeflateBlockSize, &in, stbuf.st_size,
+									(options->test?0:&out), NULL, NULL);
     if (ret==LIBDEFLATE_INSUFFICIENT_SPACE){
         msg("decompress gzip by stream fail, deflate block size too large! try decompress in memory...\n");
 		if (lseek(in.fd,0,SEEK_SET)<0){
@@ -501,7 +505,8 @@ compress_file(int compression_level, const tchar *path,
 		goto out_close_out;
 	}
 
-	ret = gzip_compress_by_stream_mt(compression_level,&in,stbuf.st_size,&out,options->thread_num, NULL);
+	ret = gzip_compress_by_stream_mt(compression_level,&in,stbuf.st_size,kCompressSteamStepSize,
+									&out, options->thread_num, NULL);
 	if (ret != 0)
 		goto out_close_out;
 
