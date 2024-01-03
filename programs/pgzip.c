@@ -439,8 +439,10 @@ decompress_file(struct libdeflate_decompressor *decompressor, const tchar *path,
 			goto out_close_out;
         ret=do_decompress(decompressor, &in, &out, options);
     }
-	if (ret != 0)
+	if (ret != 0){
+		msg("\nERROR: gzip_decompress_by_stream() error code %d\n\n",ret);
 		goto out_close_out;
+	}
 
 	if (oldpath != NULL && newpath != NULL)
 		restore_metadata(&out, newpath, &stbuf);
@@ -507,8 +509,10 @@ compress_file(int compression_level, const tchar *path,
 
 	ret = gzip_compress_by_stream_mt(compression_level,&in,stbuf.st_size,kCompressSteamStepSize,
 									&out, options->thread_num, NULL);
-	if (ret != 0)
+	if (ret != 0){
+		msg("\nERROR: gzip_compress_by_stream_mt() error code %d\n\n",ret);
 		goto out_close_out;
+	}
 
 	if (path != NULL && newpath != NULL)
 		restore_metadata(&out, newpath, &stbuf);

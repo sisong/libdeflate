@@ -87,29 +87,6 @@ libdeflate_deflate_compress(struct libdeflate_compressor *compressor,
 			    void *out, size_t out_nbytes_avail);
 
 /*
- * Large stream data can be compress by calling libdeflate_deflate_compress_block() 
- * multiple times.  Each time call this function, 'in_block_with_dict' have 
- * 'dict_nbytes' repeat of the last called's tail data as dictionary data, and 
- * 'in_block_nbytes' new data will be compressed.
- * libdeflate_deflate_compress_bound_block() can got the upper limit
- * of 'out_part' required space 'out_part_nbytes_avail'.
- * If (in_is_end_block!=0) means input data is the end block of the stream data, 
- * the process of multiple calling will finished.
- * if (out_is_flush_to_byte_align!=0) means requires output DEFLATE bit stream must
- * flushed to a byte-aligned position; Note: this request will increase output 
- * length slightly, will output some empty block bits data;  The feature can be   
- * used in multi-thread compression, the compressed part encoding for each thread 
- *  can be legally spliced into the final compressed encoding stream.
- *
- * If compression is successful, return the new compressed part data's byte length;
- * else if fail, return 0.
- */
-LIBDEFLATEAPI size_t
-libdeflate_deflate_compress_block(struct libdeflate_compressor *compressor,
-			    const void *in_block_with_dict,size_t dict_nbytes,size_t in_block_nbytes,int in_is_end_block,
-			    void *out_part, size_t out_part_nbytes_avail,int out_is_flush_to_byte_align);
-
-/*
  * libdeflate_deflate_compress_bound() returns a worst-case upper bound on the
  * number of bytes of compressed data that may be produced by compressing any
  * buffer of length less than or equal to 'in_nbytes' using
@@ -136,6 +113,31 @@ libdeflate_deflate_compress_block(struct libdeflate_compressor *compressor,
 LIBDEFLATEAPI size_t
 libdeflate_deflate_compress_bound(struct libdeflate_compressor *compressor,
 				  size_t in_nbytes);
+
+/*
+ * Large stream data can be compress by calling libdeflate_deflate_compress_block() 
+ * multiple times.  Each time call this function, 'in_block_with_dict' have 
+ * 'dict_nbytes' repeat of the last called's tail data as dictionary data, and 
+ * 'in_block_nbytes' new data will be compressed; The dictionary data size 
+ * dict_nbytes<=32k, if it is greater than 32k, the extra part of the previous
+ * part of the dictionary data is invalid.
+ * libdeflate_deflate_compress_bound_block() can got the upper limit
+ * of 'out_part' required space 'out_part_nbytes_avail'.
+ * If (in_is_end_block!=0) means input data is the end block of the stream data, 
+ * the process of multiple calling will finished.
+ * if (out_is_flush_to_byte_align!=0) means requires output DEFLATE bit stream must
+ * flushed to a byte-aligned position; Note: this request will increase output 
+ * length slightly, will output some empty block bits data;  The feature can be   
+ * used in multi-thread compression, the compressed part encoding for each thread 
+ *  can be legally spliced into the final compressed encoding stream.
+ *
+ * If compression is successful, return the new compressed part data's byte length;
+ * else if fail, return 0.
+ */
+LIBDEFLATEAPI size_t
+libdeflate_deflate_compress_block(struct libdeflate_compressor *compressor,
+			    const void *in_block_with_dict,size_t dict_nbytes,size_t in_block_nbytes,int in_is_end_block,
+			    void *out_part, size_t out_part_nbytes_avail,int out_is_flush_to_byte_align);
 
 /*
  * Large stream data can be compress by calling libdeflate_deflate_compress_block() 
@@ -310,7 +312,9 @@ enum libdeflate_decompress_stop_by {
  * Large stream data can be decompress by calling libdeflate_deflate_decompress_block() 
  * multiple times.  Each time call this function, 'out_block_with_in_dict' have 
  * 'in_dict_nbytes' repeat of the last called's tail outputed uncompressed data as 
- * dictionary data, and 'out_block_nbytes' new uncompressed data want be decompressed.
+ * dictionary data, and 'out_block_nbytes' new uncompressed data want be decompressed;
+ * The dictionary data size in_dict_nbytes<=32k, if it is greater than 32k, the extra
+ * part of the previous part of the dictionary data is invalid.
  * libdeflate_deflate_compress_bound_block(out_block_nbytes) can got the upper limit
  *  of 'in_part' required space 'in_part_nbytes_bound'.
  * 'is_final_block_ret' can NULL.

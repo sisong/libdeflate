@@ -5,6 +5,7 @@
 #include <vector>
 #include <thread>
 #include <mutex>
+#include <atomic>
 #include "../lib/gzip_overhead.h"
 #include "gzip_compress_by_stream_mt.h"
 #include <assert.h>
@@ -36,10 +37,10 @@ struct TThreadData{
     u64                 in_size;
     struct file_stream* out;
     u64                 out_cur;
-    int                 err_code;
+    std::atomic<int>    err_code;
 
     u64                 _in_cur;
-    u64                 _in_cur_writed_end;
+    std::atomic<u64>    _in_cur_writed_end;
     TWorkBuf*           _codeBuf_list;
     TWorkBuf*           _freeBuf_list;
     u8*                 _dictBuf;
@@ -47,8 +48,6 @@ struct TThreadData{
     std::mutex          _lock_read;
     std::mutex          _lock_write;
 };
-
-    #define _check_td(v,_ret_errCode) do { if (!(v)) {td->err_code=_ret_errCode; goto _out; } } while (0)
 
     static inline void _insert_freeBufs(TWorkBuf** node_list,TWorkBuf* nodes){
         assert(nodes!=0);
@@ -86,51 +85,41 @@ struct TThreadData{
         return result;
     }
 
-    static forceinline void __do_update_err_code(TThreadData* td,int err_code){
-        if (td->err_code==0) td->err_code=err_code;
-    }
     static inline void _update_err_code(TThreadData* td,int err_code){
         if (err_code!=0){
-            std::lock_guard<std::mutex> _auto_locker(td->_lock_slight);
-            __do_update_err_code(td,err_code);
+            int _expected=0;
+            td->err_code.compare_exchange_weak(_expected,err_code);
         }
     }
 
     static TWorkBuf* _write_codeBufs(TThreadData* td,TWorkBuf* nodes){
+        assert(nodes!=0);
         int err_code=0;
-        TWorkBuf* result=0;
-        u64 in_cur_writed_end=td->_in_cur_writed_end;
-        while(nodes){
-            TWorkBuf* _nodes=nodes;
-            {
-                std::lock_guard<std::mutex> _auto_locker(td->_lock_write);
-                while (nodes){
-                    assert(in_cur_writed_end==nodes->in_cur);
-                    const u8* pcode=nodes->buf+nodes->dict_size+nodes->in_nbytes;
-                    int w_ret=full_write(td->out,pcode,nodes->code_nbytes);
-                    _check(w_ret==0, LIBDEFLATE_ENSTREAM_MT_WRITE_FILE_ERROR);
-                    td->out_cur+=nodes->code_nbytes;
+        TWorkBuf* result=nodes;
+        u64 in_cur_writed_end=td->_in_cur_writed_end.load();
+        {
+            std::lock_guard<std::mutex> _auto_locker(td->_lock_write);
+            while (nodes){
+                assert(in_cur_writed_end==nodes->in_cur);
+                const u8* pcode=nodes->buf+nodes->dict_size+nodes->in_nbytes;
+                int w_ret=full_write(td->out,pcode,nodes->code_nbytes);
+                _check(w_ret==0, LIBDEFLATE_ENSTREAM_MT_WRITE_FILE_ERROR);
+                td->out_cur+=nodes->code_nbytes;
 
-                    in_cur_writed_end=nodes->in_cur+nodes->in_nbytes;
-                    nodes=nodes->next;
-                }
-            }
-            _insert_freeBufs(&result,_nodes);
-            {
-                std::lock_guard<std::mutex> _auto_locker(td->_lock_slight);
-                if (err_code!=0) return 0;
-                td->_in_cur_writed_end=in_cur_writed_end;
-                nodes=_by_order_pop_codeBufs(&td->_codeBuf_list,in_cur_writed_end);
-                if (nodes==0) return result; //ok
+                in_cur_writed_end=nodes->in_cur+nodes->in_nbytes;
+                nodes=nodes->next;
             }
         }
+        td->_in_cur_writed_end.store(in_cur_writed_end);
+        return result; //ok
+
     _out:
-        std::lock_guard<std::mutex> _auto_locker(td->_lock_slight);
-        __do_update_err_code(td,err_code);
+        _update_err_code(td,err_code);
         return 0; //fail
     }
 
-    static TWorkBuf* _read_to_one_codeBuf(TThreadData* td,TWorkBuf* node){
+    static TWorkBuf* _read_data_to_one_buf(TThreadData* td,TWorkBuf* node){
+        assert(node!=0);
         int err_code=0;
         {
             std::lock_guard<std::mutex> _auto_locker(td->_lock_read);
@@ -156,34 +145,41 @@ struct TThreadData{
         return (err_code==0)?node:0;
     }
 
-    static TWorkBuf* _new_workBuf(TThreadData* td,TWorkBuf* finished_node){
-        TWorkBuf* result=0;
-        while (result==0){//wait a free buf by loop  //todo: wait by signal
-            TWorkBuf* need_write_codeBufs=0;
-            {
-                std::lock_guard<std::mutex> _auto_locker(td->_lock_slight);
-                if ((td->err_code!=0)||(td->_in_cur_writed_end==td->in_size)) return 0;
-                if (finished_node){
-                    _by_order_insert_one_codeBuf(&td->_codeBuf_list,finished_node);
-                    finished_node=0;
-                }
-                need_write_codeBufs=_by_order_pop_codeBufs(&td->_codeBuf_list,td->_in_cur_writed_end);
-                if (need_write_codeBufs==0)
-                    result=_pop_one_freeBuf(&td->_freeBuf_list);
-            }
-            if (need_write_codeBufs){
-                result=_write_codeBufs(td,need_write_codeBufs);
-                if ((result)&&(result->next)){
+    static TWorkBuf* _new_workBuf(TThreadData* td,TWorkBuf* finished_node,size_t thread_i){
+        while (true){
+            TWorkBuf* result=0;
+            while (result==0){//wait a free buf by loop  //todo: wait by signal, not use thread yield
+                TWorkBuf* need_write_codeBufs=0;
+                {   
+                    const u64 in_cur_writed_end=td->_in_cur_writed_end.load();
+                    if (in_cur_writed_end==td->in_size) return 0; //all write work finished
+                    if (td->err_code.load()!=0) return 0;
+
                     std::lock_guard<std::mutex> _auto_locker(td->_lock_slight);
-                    _insert_freeBufs(&td->_freeBuf_list,result->next);
-                    result->next=0;
+                    if (finished_node){
+                        _by_order_insert_one_codeBuf(&td->_codeBuf_list,finished_node);
+                        finished_node=0;
+                    }
+                    need_write_codeBufs=_by_order_pop_codeBufs(&td->_codeBuf_list,in_cur_writed_end);//try get write works
+                    if (need_write_codeBufs==0)
+                        result=_pop_one_freeBuf(&td->_freeBuf_list);
                 }
+                if (need_write_codeBufs){ //do write works
+                    result=_write_codeBufs(td,need_write_codeBufs);
+                    if ((result)&&(result->next)){ //only need a free buf
+                        std::lock_guard<std::mutex> _auto_locker(td->_lock_slight);
+                        _insert_freeBufs(&td->_freeBuf_list,result->next);
+                        result->next=0;
+                    }
+                }
+                if (result==0)
+                    std::this_thread::yield(); 
             }
-            if (result==0)
-                std::this_thread::yield(); 
-        }
         
-        return _read_to_one_codeBuf(td,result);
+            result=_read_data_to_one_buf(td,result); //try get a compress work
+            if (result) return result;  //got a compress work
+            if (thread_i!=0) return 0;  //always keep thread 0 loop until all write work finished, other threads can exit
+        }
     }
 
 static void _compress_blocks_thread(TThreadData* td,size_t thread_i){
@@ -191,7 +187,7 @@ static void _compress_blocks_thread(TThreadData* td,size_t thread_i){
     struct libdeflate_compressor* c=td->c_list[thread_i];
     TWorkBuf* wbuf=0;
     try{
-        while (wbuf=_new_workBuf(td,wbuf)){
+        while (wbuf=_new_workBuf(td,wbuf,thread_i)){
             wbuf->code_nbytes=libdeflate_deflate_compress_block(c,wbuf->buf,wbuf->dict_size,wbuf->in_nbytes,
                                                 wbuf->is_end_block,wbuf->buf+wbuf->dict_size+wbuf->in_nbytes,
                                                 td->block_bound,is_byte_align);
@@ -201,7 +197,7 @@ static void _compress_blocks_thread(TThreadData* td,size_t thread_i){
             }
         }
     }catch(...){
-        __do_update_err_code(td,LIBDEFLATE_ENSTREAM_MT_THREAD_EXCEPTION_ERROR);
+        _update_err_code(td,LIBDEFLATE_ENSTREAM_MT_THREAD_EXCEPTION_ERROR);
     }
 }
 
@@ -210,6 +206,7 @@ static void _compress_blocks_mt(TThreadData* td,size_t thread_num,u8* pmem,size_
     td->_in_cur_writed_end=0;
     td->_codeBuf_list=0;
     td->_freeBuf_list=0;
+    td->err_code=0;
     for (size_t i=0;i<workBufCount;i++,pmem+=one_buf_size){
         TWorkBuf* wbuf=(TWorkBuf*)pmem;
         wbuf->next=0;
@@ -220,14 +217,14 @@ static void _compress_blocks_mt(TThreadData* td,size_t thread_num,u8* pmem,size_
     try{
         std::vector<std::thread> threads(thread_num-1);
         for (size_t i=0; i<threads.size();i++)
-            threads[i]=std::thread(_compress_blocks_thread,td,i);
-        _compress_blocks_thread(td,thread_num-1);
+            threads[i]=std::thread(_compress_blocks_thread,td,i+1);
+        _compress_blocks_thread(td,0);
         for (size_t i=0;i<threads.size();i++)
             threads[i].join();
-        if ((td->err_code==0)&&(td->_in_cur_writed_end!=td->in_size))
-            td->err_code=LIBDEFLATE_ENSTREAM_MT_OUT_LACK_ERROR;
+        if (td->_in_cur_writed_end.load()!=td->in_size)
+           _update_err_code(td,LIBDEFLATE_ENSTREAM_MT_OUT_LACK_ERROR);
     }catch(...){
-        td->err_code=LIBDEFLATE_ENSTREAM_MT_EXCEPTION_ERROR;
+        _update_err_code(td,LIBDEFLATE_ENSTREAM_MT_EXCEPTION_ERROR);
     }
 }
 
@@ -297,7 +294,7 @@ int gzip_compress_by_stream_mt(int compression_level,struct file_stream *in,u64 
             memmove(pdata,pdata+dict_size+in_nbytes-nextDictSize,nextDictSize);
         }
     }else{ // compress blocks multi-thread
-        TThreadData threadData={c_list,in_step_size,in_crc,block_bound,in,in_size,out,out_cur,err_code};
+        TThreadData threadData={c_list,in_step_size,in_crc,block_bound,in,in_size,out,out_cur};
         _compress_blocks_mt(&threadData,thread_num,pmem,one_buf_size,workBufCount);
         in_crc=threadData.in_crc;
         out_cur=threadData.out_cur;
