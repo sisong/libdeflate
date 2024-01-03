@@ -1,6 +1,6 @@
 /*
  * gzip_compress_by_stream_mt.cpp
- * added compress by stream & muti-thread parallel, 2023 housisong
+ * added compress by stream & multi-thread parallel, 2023 housisong
  */
 #include <vector>
 #include <thread>
@@ -15,7 +15,7 @@ static const size_t kDictSize  = (1<<15); //MATCHFINDER_WINDOW_SIZE
 static inline size_t _dictSize_avail(u64 uncompressed_pos) {
                         return (uncompressed_pos<kDictSize)?(size_t)uncompressed_pos:kDictSize; }
 
-//muti-thread
+//multi-thread
 
     struct TWorkBuf{
         struct TWorkBuf*    next;
@@ -51,7 +51,7 @@ struct TThreadData{
     #define _check_td(v,_ret_errCode) do { if (!(v)) {td->err_code=_ret_errCode; goto _out; } } while (0)
 
     static inline void _insert_freeBufs(TWorkBuf** node_list,TWorkBuf* nodes){
-        if (nodes==0) return;
+        assert(nodes!=0);
         TWorkBuf* root=nodes;
         while (nodes->next) nodes=nodes->next;
         nodes->next=*node_list;
@@ -59,8 +59,10 @@ struct TThreadData{
     }
     static inline TWorkBuf* _pop_one_freeBuf(TWorkBuf** node_list){
         TWorkBuf* result=*node_list;
-        if (result)
+        if (result){
             *node_list=result->next;
+            result->next=0;
+        }
         return result;
     }
     static inline void _by_order_insert_one_codeBuf(TWorkBuf** node_list,TWorkBuf* node){
@@ -155,32 +157,32 @@ struct TThreadData{
     }
 
     static TWorkBuf* _new_workBuf(TThreadData* td,TWorkBuf* finished_node){
-        TWorkBuf* need_write_codeBufs=0;
-        if (finished_node){
-            std::lock_guard<std::mutex> _auto_locker(td->_lock_slight);
-            if (td->err_code!=0) return 0;
-            _by_order_insert_one_codeBuf(&td->_codeBuf_list,finished_node);
-            need_write_codeBufs=_by_order_pop_codeBufs(&td->_codeBuf_list,td->_in_cur_writed_end);
-        }
         TWorkBuf* result=0;
-        if (need_write_codeBufs){
-            result=_write_codeBufs(td,need_write_codeBufs);
-            std::lock_guard<std::mutex> _auto_locker(td->_lock_slight);
-            if (td->err_code!=0) return 0;
-            _insert_freeBufs(&td->_freeBuf_list,result->next);
-        }
-
         while (result==0){//wait a free buf by loop  //todo: wait by signal
+            TWorkBuf* need_write_codeBufs=0;
             {
-                std::lock_guard<std::mutex> _auto_locker(td->_lock_read);
-                if (td->err_code!=0) return 0;
-                result=_pop_one_freeBuf(&td->_freeBuf_list);
+                std::lock_guard<std::mutex> _auto_locker(td->_lock_slight);
+                if ((td->err_code!=0)||(td->_in_cur_writed_end==td->in_size)) return 0;
+                if (finished_node){
+                    _by_order_insert_one_codeBuf(&td->_codeBuf_list,finished_node);
+                    finished_node=0;
+                }
+                need_write_codeBufs=_by_order_pop_codeBufs(&td->_codeBuf_list,td->_in_cur_writed_end);
+                if (need_write_codeBufs==0)
+                    result=_pop_one_freeBuf(&td->_freeBuf_list);
+            }
+            if (need_write_codeBufs){
+                result=_write_codeBufs(td,need_write_codeBufs);
+                if ((result)&&(result->next)){
+                    std::lock_guard<std::mutex> _auto_locker(td->_lock_slight);
+                    _insert_freeBufs(&td->_freeBuf_list,result->next);
+                    result->next=0;
+                }
             }
             if (result==0)
                 std::this_thread::yield(); 
         }
         
-        result->next=0;
         return _read_to_one_codeBuf(td,result);
     }
 
@@ -211,7 +213,7 @@ static void _compress_blocks_mt(TThreadData* td,size_t thread_num,u8* pmem,size_
     for (size_t i=0;i<workBufCount;i++,pmem+=one_buf_size){
         TWorkBuf* wbuf=(TWorkBuf*)pmem;
         wbuf->next=0;
-        _insert_freeBufs(&td->_freeBuf_list,(TWorkBuf*)pmem);
+        _insert_freeBufs(&td->_freeBuf_list,wbuf);
     }
     td->_dictBuf=pmem;
     
@@ -294,7 +296,7 @@ int gzip_compress_by_stream_mt(int compression_level,struct file_stream *in,u64 
             size_t nextDictSize=_dictSize_avail(in_cur);
             memmove(pdata,pdata+dict_size+in_nbytes-nextDictSize,nextDictSize);
         }
-    }else{ // compress blocks muti-thread
+    }else{ // compress blocks multi-thread
         TThreadData threadData={c_list,in_step_size,in_crc,block_bound,in,in_size,out,out_cur,err_code};
         _compress_blocks_mt(&threadData,thread_num,pmem,one_buf_size,workBufCount);
         in_crc=threadData.in_crc;

@@ -1,6 +1,6 @@
 /*
  * pgzip.c - a file compression and decompression program
- * added compression by stream & muti-thread parallel, 2023 housisong
+ * added compression by stream & multi-thread parallel, 2023 housisong
  *
  * Copyright 2016 Eric Biggers
  *
@@ -94,7 +94,7 @@ show_version(void)
 	printf(
 "pgzip compression program v" LIBDEFLATE_VERSION_STRING "\n"
 "Copyright 2016 Eric Biggers\n"
-"added compression by stream & muti-thread parallel, 2023 housisong\n"
+"added compression by stream & multi-thread parallel, 2023 housisong\n"
 "\n"
 "This program is free software which may be modified and/or redistributed\n"
 "under the terms of the MIT license.  There is NO WARRANTY, to the extent\n"
