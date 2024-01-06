@@ -3658,15 +3658,72 @@ deflate_compress_near_optimal(struct libdeflate_compressor * restrict c,
 	struct lz_match *cache_ptr = c->p.n.match_cache;
 	u32 next_hashes[2] = {0, 0};
 	bool prev_block_used_only_literals = false;
-	bool _is_in_dict = (dict_nbytes>0);
 
 	bt_matchfinder_init(&c->p.n.bt_mf);
 	deflate_near_optimal_init_stats(c);
 
+	if (dict_nbytes>0){
+		const u8 * const in_max_block_end = in_block_begin + dict_nbytes; /* dict data as first block */
+		for (;;) {
+			struct lz_match *matches;
+			unsigned best_len;
+			size_t remaining = in_end - in_next;
+
+			if (in_next == in_next_slide) {
+				bt_matchfinder_slide_window(&c->p.n.bt_mf);
+				in_cur_base = in_next;
+				in_next_slide = in_next +
+					MIN(remaining, MATCHFINDER_WINDOW_SIZE);
+			}
+
+			matches = cache_ptr;
+			best_len = 0;
+			adjust_max_and_nice_len(&max_len, &nice_len, remaining);
+			if (likely(max_len >= BT_MATCHFINDER_REQUIRED_NBYTES)) {
+				cache_ptr = bt_matchfinder_get_matches(
+						&c->p.n.bt_mf,
+						in_cur_base,
+						in_next - in_cur_base,
+						max_len,
+						nice_len,
+						c->max_search_depth,
+						next_hashes,
+						matches);
+				if (cache_ptr > matches)
+					best_len = cache_ptr[-1].length;
+			}
+
+			cache_ptr->length = cache_ptr - matches;
+			cache_ptr->offset = *in_next;
+			in_next++;
+			cache_ptr++;
+			
+			if (in_next >= in_max_block_end)
+				break;
+		}
+
+		{
+			u32 block_length = in_next - in_block_begin;
+			bool is_first = (in_block_begin == in);
+			bool is_final = (in_next == in_end);
+
+			deflate_near_optimal_merge_stats(c);
+			deflate_optimize_and_flush_block(
+						c, os, in_block_begin,
+						block_length, cache_ptr,
+						is_first, is_final, true,
+						&prev_block_used_only_literals);
+			cache_ptr = &c->p.n.match_cache[0];
+			deflate_near_optimal_save_stats(c);
+			deflate_near_optimal_init_stats(c);
+			in_block_begin = in_next;
+		}
+	}
+
 	do {
 		/* Starting a new DEFLATE block */
-		const u8 * const in_max_block_end = _is_in_dict ? in_block_begin + dict_nbytes :
-			 	choose_max_block_end(in_block_begin, in_end, SOFT_MAX_BLOCK_LENGTH);
+		const u8 * const in_max_block_end = choose_max_block_end(
+				in_block_begin, in_end, SOFT_MAX_BLOCK_LENGTH);
 		const u8 *prev_end_block_check = NULL;
 		bool change_detected = false;
 		const u8 *next_observation = in_next;
@@ -3744,7 +3801,7 @@ deflate_compress_near_optimal(struct libdeflate_compressor * restrict c,
 				if (cache_ptr > matches)
 					best_len = cache_ptr[-1].length;
 			}
-			if ((in_next >= next_observation)&&(!_is_in_dict)) {
+			if (in_next >= next_observation) {
 				if (best_len >= min_len) {
 					observe_match(&c->split_stats,
 						      best_len);
@@ -3761,13 +3818,6 @@ deflate_compress_near_optimal(struct libdeflate_compressor * restrict c,
 			cache_ptr->offset = *in_next;
 			in_next++;
 			cache_ptr++;
-			if (_is_in_dict){
-				/* Maximum block length or end of input reached? */
-				if (in_next >= in_max_block_end)
-					break;
-				prev_end_block_check = in_next;
-				continue;
-			}
 
 			/*
 			 * If there was a very long match found, don't cache any
@@ -3873,7 +3923,7 @@ deflate_compress_near_optimal(struct libdeflate_compressor * restrict c,
 			deflate_optimize_and_flush_block(
 						c, os, in_block_begin,
 						block_length, cache_ptr,
-						is_first, is_final, _is_in_dict,
+						is_first, is_final, false,
 						&prev_block_used_only_literals);
 			memmove(c->p.n.match_cache, cache_ptr,
 				cache_len_rewound * sizeof(*cache_ptr));
@@ -3885,7 +3935,6 @@ deflate_compress_near_optimal(struct libdeflate_compressor * restrict c,
 			 */
 			deflate_near_optimal_clear_old_stats(c);
 			in_block_begin = in_block_end;
-			_is_in_dict=false;
 		} else {
 			/*
 			 * The block is being ended for a reason other than a
@@ -3900,13 +3949,12 @@ deflate_compress_near_optimal(struct libdeflate_compressor * restrict c,
 			deflate_optimize_and_flush_block(
 						c, os, in_block_begin,
 						block_length, cache_ptr,
-						is_first, is_final, _is_in_dict,
+						is_first, is_final, false,
 						&prev_block_used_only_literals);
 			cache_ptr = &c->p.n.match_cache[0];
 			deflate_near_optimal_save_stats(c);
 			deflate_near_optimal_init_stats(c);
 			in_block_begin = in_next;
-			_is_in_dict=false;
 		}
 	} while (in_next != in_end && !os->overflow);
 }
