@@ -7,7 +7,9 @@
 #include "gzip_decompress_by_stream.h"
 #include <assert.h>
 
-static const size_t kDictSize  = (1<<15); //MATCHFINDER_WINDOW_SIZE
+#define             kDictSize    (1<<15)  //MATCHFINDER_WINDOW_SIZE
+static const size_t kMaxDeflateBlockSize_min =1024*4;
+static const size_t kMaxDeflateBlockSize_max = ((~(size_t)0)-kDictSize)/4;
 #define _check(v,_ret_errCode) do { if (!(v)) {err_code=_ret_errCode; goto _out; } } while (0)
 #define _check_d(_d_ret) _check(_d_ret==LIBDEFLATE_SUCCESS, _d_ret)
 static inline size_t _dictSize_avail(u64 uncompressed_pos) { 
@@ -26,7 +28,13 @@ static inline size_t _dictSize_avail(u64 uncompressed_pos) {
     in_cur+=read_len;               \
 } while(0)
 
-int gzip_decompress_by_stream(struct libdeflate_decompressor *d,size_t curBlockSize,
+static inline size_t _limitMaxDefBSize(size_t maxDeflateBlockSize){
+    if (unlikely(maxDeflateBlockSize<kMaxDeflateBlockSize_min)) return kMaxDeflateBlockSize_min;
+    if (unlikely(maxDeflateBlockSize>kMaxDeflateBlockSize_max)) return kMaxDeflateBlockSize_max;
+    return maxDeflateBlockSize;
+}
+
+int gzip_decompress_by_stream(struct libdeflate_decompressor *d,size_t maxDeflateBlockSize,
 	                        struct file_stream *in, u64 in_size,struct file_stream *out,
 							u64* _actual_in_nbytes_ret,u64* _actual_out_nbytes_ret){
     int err_code=0;
@@ -35,6 +43,7 @@ int gzip_decompress_by_stream(struct libdeflate_decompressor *d,size_t curBlockS
     u8* data_buf;
     u64    in_cur=0;
     u64    out_cur=0;
+    const size_t curBlockSize=_limitMaxDefBSize(maxDeflateBlockSize);
     const size_t data_buf_size=curBlockSize*2+kDictSize;
     size_t data_cur=kDictSize; //empty
     size_t code_buf_size=(curBlockSize*2<in_size)?curBlockSize*2:in_size;

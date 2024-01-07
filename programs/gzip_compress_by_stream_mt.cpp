@@ -12,6 +12,7 @@
 namespace {
 
 static const size_t kDictSize  = (1<<15); //MATCHFINDER_WINDOW_SIZE
+static const size_t kStepSize_min =128;
 #define _check(v,_ret_errCode) do { if (!(v)) {err_code=_ret_errCode; goto _out; } } while (0)
 static inline size_t _dictSize_avail(u64 uncompressed_pos) {
                         return (uncompressed_pos<kDictSize)?(size_t)uncompressed_pos:kDictSize; }
@@ -228,6 +229,12 @@ static void _compress_blocks_mt(TThreadData* td,size_t thread_num,u8* pmem,size_
     }
 }
 
+static inline size_t _limitStepSize(u64 in_size,size_t in_step_size){
+    if (unlikely(in_step_size>in_size)) in_step_size=in_size;
+    if (unlikely(in_step_size<kStepSize_min)) in_step_size=kStepSize_min;
+    return in_step_size;
+}
+
 } //namespace
 
 int gzip_compress_by_stream_mt(int compression_level,struct file_stream *in,u64 in_size,size_t in_step_size,
@@ -237,6 +244,7 @@ int gzip_compress_by_stream_mt(int compression_level,struct file_stream *in,u64 
     struct libdeflate_compressor** c_list=0;
     uint32_t     in_crc=0;
     u64 out_cur=0;
+    in_step_size=_limitStepSize(in_size,in_step_size);
     const u64 _allWorkCount=(in_size+in_step_size-1)/in_step_size;
     thread_num=(thread_num<=1)?1:((thread_num<_allWorkCount)?thread_num:_allWorkCount);
     size_t workBufCount=(thread_num<=1)?1:(thread_num+(thread_num-1)/2+1);

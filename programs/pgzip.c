@@ -40,7 +40,7 @@
 #  include <utime.h>
 #endif
 
-static const size_t kCompressSteamStepSize = (size_t)1024*1024*2;
+static const size_t kCompressStreamStepSize= (size_t)1024*1024*2;
 static const size_t kMaxDeflateBlockSize   = (size_t)1024*1024*8; 
 
 #define GZIP_MIN_HEADER_SIZE	10
@@ -507,7 +507,7 @@ compress_file(int compression_level, const tchar *path,
 		goto out_close_out;
 	}
 
-	ret = gzip_compress_by_stream_mt(compression_level,&in,stbuf.st_size,kCompressSteamStepSize,
+	ret = gzip_compress_by_stream_mt(compression_level,&in,stbuf.st_size,kCompressStreamStepSize,
 									&out, options->thread_num, NULL);
 	if (ret != 0){
 		msg("\nERROR: gzip_compress_by_stream_mt() error code %d\n\n",ret);
