@@ -123,7 +123,7 @@ libdeflate_deflate_compress_bound(struct libdeflate_compressor *compressor,
  * part of the dictionary data is invalid.
  * libdeflate_deflate_compress_bound_block() can got the upper limit
  * of 'out_part' required space 'out_part_nbytes_avail'.
- * If (in_is_end_block!=0) means input data is the end block of the stream data, 
+ * If (in_is_final_block!=0) means input data is the end block of the stream data, 
  * the process of multiple calling will finished.
  * if (out_is_flush_to_byte_align!=0) means requires output DEFLATE bit stream must
  * flushed to a byte-aligned position; Note: this request will increase output 
@@ -136,7 +136,7 @@ libdeflate_deflate_compress_bound(struct libdeflate_compressor *compressor,
  */
 LIBDEFLATEAPI size_t
 libdeflate_deflate_compress_block(struct libdeflate_compressor *compressor,
-			    const void *in_block_with_dict,size_t dict_nbytes,size_t in_block_nbytes,int in_is_end_block,
+			    const void *in_block_with_dict,size_t dict_nbytes,size_t in_block_nbytes,int in_is_final_block,
 			    void *out_part, size_t out_part_nbytes_avail,int out_is_flush_to_byte_align);
 
 /*

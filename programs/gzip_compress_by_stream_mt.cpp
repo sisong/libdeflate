@@ -24,7 +24,7 @@ static inline size_t _dictSize_avail(u64 uncompressed_pos) {
         u64                 in_cur;
         size_t              in_nbytes;
         size_t              code_nbytes;
-        bool                is_end_block;
+        bool                is_final_block;
         u8                  buf[1]; //one_buf_size
     };
 
@@ -124,8 +124,8 @@ struct TThreadData{
         {
             std::lock_guard<std::mutex> _auto_locker(td->_lock_read);
             if (td->_in_cur==td->in_size) return 0;
-            node->is_end_block=(td->_in_cur+td->in_step_size>=td->in_size);
-            node->in_nbytes=node->is_end_block?td->in_size-td->_in_cur:td->in_step_size;
+            node->is_final_block=(td->_in_cur+td->in_step_size>=td->in_size);
+            node->in_nbytes=node->is_final_block?td->in_size-td->_in_cur:td->in_step_size;
             node->dict_size=_dictSize_avail(td->_in_cur);
             node->in_cur=td->_in_cur;
             memcpy(node->buf,td->_dictBuf,node->dict_size);
@@ -189,7 +189,7 @@ static void _compress_blocks_thread(TThreadData* td,size_t thread_i){
     try{
         while (wbuf=_new_workBuf(td,wbuf,thread_i)){
             wbuf->code_nbytes=libdeflate_deflate_compress_block(c,wbuf->buf,wbuf->dict_size,wbuf->in_nbytes,
-                                                wbuf->is_end_block,wbuf->buf+wbuf->dict_size+wbuf->in_nbytes,
+                                                wbuf->is_final_block,wbuf->buf+wbuf->dict_size+wbuf->in_nbytes,
                                                 td->block_bound,is_byte_align);
             if (wbuf->code_nbytes==0){
                 _update_err_code(td,LIBDEFLATE_ENSTREAM_MT_COMPRESS_BLOCK_ERROR); //compress error
@@ -269,8 +269,8 @@ int gzip_compress_by_stream_mt(int compression_level,struct file_stream *in,u64 
         u8* pcode=pdata+kDictSize+in_step_size;
         struct libdeflate_compressor* c=c_list[0];
         for (u64 in_cur=0;in_cur<in_size;){//compress by stream
-            bool is_end_block=(in_cur+in_step_size>=in_size);
-            size_t in_nbytes=is_end_block?in_size-in_cur:in_step_size;
+            bool is_final_block=(in_cur+in_step_size>=in_size);
+            size_t in_nbytes=is_final_block?in_size-in_cur:in_step_size;
             size_t dict_size=_dictSize_avail(in_cur);
 
             //read block data
@@ -279,7 +279,7 @@ int gzip_compress_by_stream_mt(int compression_level,struct file_stream *in,u64 
             in_crc=libdeflate_crc32(in_crc,pdata+dict_size,in_nbytes);
 
             //compress the block
-            size_t code_nbytes=libdeflate_deflate_compress_block(c,pdata,dict_size,in_nbytes,is_end_block,
+            size_t code_nbytes=libdeflate_deflate_compress_block(c,pdata,dict_size,in_nbytes,is_final_block,
                                                               pcode,block_bound,is_byte_align);
             _check(code_nbytes>0, LIBDEFLATE_ENSTREAM_COMPRESS_BLOCK_ERROR);
 
