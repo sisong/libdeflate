@@ -4143,33 +4143,31 @@ libdeflate_deflate_compress(struct libdeflate_compressor *c,
 }
 
 
-static size_t _deflate_flush_to_byte_align(struct deflate_output_bitstream* os){
-    ASSERT((os->bitcount>=1)&&(os->bitcount<=7));
+static size_t _deflate_flush_to_byte_align(u8* out,size_t out_nbytes_avail,bitbuf_t bitbuf,unsigned bitcount){
+	ASSERT(out<(out+out_nbytes_avail));
+    ASSERT((bitcount>=1)&&(bitcount<=7));
 	STATIC_ASSERT(WORDBITS >= 32);
-	u8* const next=os->next;
-	const size_t out_nbytes_avail=os->end - next;
-	bitbuf_t bitbuf=os->bitbuf;
-	switch (os->bitcount) {
+	switch (bitcount) {
 		case 1: case 3: case 5: case 7:{
-			return deflate_compress_none(0,0,next,out_nbytes_avail,bitbuf,os->bitcount,0);
+			return deflate_compress_none(0,0,out,out_nbytes_avail,bitbuf,bitcount,0);
 		} break;
 		case 2:{ // 2,4,6 add static empty blocks
 			if (unlikely(out_nbytes_avail<4)) return 0;
 			bitbuf |= ((2<<20)|(2<<10)|2) <<2;
-			put_unaligned_le32((u32)bitbuf,next);
+			put_unaligned_le32((u32)bitbuf,out);
 			return 4;
 		} break;
 		case 4:{
 			if (unlikely(out_nbytes_avail<3)) return 0;
 			bitbuf |= ((2<<10)|2) <<4;
-			put_unaligned_le16((u16)bitbuf,next);
-			next[2]=(u8)(bitbuf>>16);
+			put_unaligned_le16((u16)bitbuf,out);
+			out[2]=(u8)(bitbuf>>16);
 			return 3;
 		} break;
 		case 6:{
 			if (unlikely(out_nbytes_avail<2)) return 0;
 			bitbuf |= 2 <<6;
-			put_unaligned_le16((u16)bitbuf,next);
+			put_unaligned_le16((u16)bitbuf,out);
 			return 2;
 		} break;
 		default:
@@ -4225,8 +4223,8 @@ libdeflate_deflate_compress_block(struct libdeflate_compressor *c,
 			ASSERT(os.next < os.end);
         	*os.next++ = os.bitbuf;
 		}else if (out_is_flush_to_byte_align){
-			size_t fbytes=_deflate_flush_to_byte_align(&os);
-			if (!fbytes) return 0;
+			size_t fbytes=_deflate_flush_to_byte_align(os.next,os.end-os.next,os.bitbuf,os.bitcount);
+			if (unlikely(fbytes==0)) return 0;
 			os.next+=fbytes;
 		}else{ //backup for next block
 			c->bitbuf_back_for_block=os.bitbuf;
