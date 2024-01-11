@@ -766,6 +766,10 @@ block_done:
 			if (out_next<out_end)
 				goto next_block;
 		} break;
+		case LIBDEFLATE_STOP_BY_ANY_BLOCK_AND_FULL_OUTPUT_AND_IN_BYTE_ALIGN:{
+			if ((out_next<out_end)|((bitsleft&7)!=0))
+				goto next_block;
+		} break;
 	}
 
 	/* That was the last block. */
