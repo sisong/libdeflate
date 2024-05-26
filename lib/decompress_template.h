@@ -51,7 +51,7 @@
 		bitbuf = 0;			\
 		bitsleft = 0; } while(0)
 
-static enum libdeflate_result ATTRIBUTES MAYBE_UNUSED
+static ATTRIBUTES MAYBE_UNUSED enum libdeflate_result
 FUNCNAME(struct libdeflate_decompressor * restrict d,
 	 const void * restrict in, size_t in_nbytes,
 	 void * restrict out, size_t in_dict_nbytes, size_t out_nbytes_avail,
