@@ -86,6 +86,7 @@ static inline u32 get_arm_cpu_features(void) { return 0; }
 #  define HAVE_NEON_INTRIN	0
 #endif
 
+#ifndef HAVE_PMULL_INTRIN
 /* PMULL */
 #ifdef __ARM_FEATURE_CRYPTO
 #  define HAVE_PMULL(features)	1
@@ -104,6 +105,7 @@ static inline u32 get_arm_cpu_features(void) { return 0; }
 #  endif
 #else
 #  define HAVE_PMULL_INTRIN	0
+#endif
 #endif
 
 /* CRC32 */
