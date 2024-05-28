@@ -51,6 +51,59 @@
 		bitbuf = 0;			\
 		bitsleft = 0; } while(0)
 
+#ifndef _DEF_g_static_decoder_is_init
+#define _DEF_g_static_decoder_is_init
+static volatile bool _g_static_decoder_is_init=false;
+static struct libdeflate_decompressor _g_static_decoder;
+static bool _do_build_static_decoder(struct libdeflate_decompressor *d){
+		/*
+		 * Static Huffman block: build the decode tables for the static
+		 * codes.  Skip doing so if the tables are already set up from
+		 * an earlier static block; this speeds up decompression of
+		 * degenerate input of many empty or very short static blocks.
+		 *
+		 * Afterwards, the remainder is the same as decompressing a
+		 * dynamic Huffman block.
+		 */
+	    unsigned i;
+
+        STATIC_ASSERT(DEFLATE_NUM_LITLEN_SYMS == 288);
+        STATIC_ASSERT(DEFLATE_NUM_OFFSET_SYMS == 32);
+
+        for (i = 0; i < 144; i++)
+            d->u.l.lens[i] = 8;
+        for (; i < 256; i++)
+            d->u.l.lens[i] = 9;
+        for (; i < 280; i++)
+            d->u.l.lens[i] = 7;
+        for (; i < 288; i++)
+            d->u.l.lens[i] = 8;
+
+        for (; i < 288 + 32; i++)
+            d->u.l.lens[i] = 5;
+
+        if (!build_offset_decode_table(d,DEFLATE_NUM_LITLEN_SYMS,DEFLATE_NUM_OFFSET_SYMS))
+            return false;
+        if (!build_litlen_decode_table(d,DEFLATE_NUM_LITLEN_SYMS,DEFLATE_NUM_OFFSET_SYMS))
+            return false;
+		d->static_codes_loaded = true;
+        memcpy(&_g_static_decoder,d,sizeof(*d));
+        return true;
+}
+
+static struct libdeflate_decompressor* load_static_decoder(struct libdeflate_decompressor *d){
+    if (!_g_static_decoder_is_init){
+        if (!_do_build_static_decoder(d))
+            return 0;
+        _g_static_decoder_is_init=true;
+		return d;
+    }else{
+        return &_g_static_decoder;
+    }
+}
+#endif //_DEF_g_static_decoder_is_init
+
+
 static ATTRIBUTES MAYBE_UNUSED enum libdeflate_result
 FUNCNAME(struct libdeflate_decompressor * restrict d,
 	 const void * restrict in, size_t in_nbytes,
@@ -58,6 +111,7 @@ FUNCNAME(struct libdeflate_decompressor * restrict d,
 	 size_t *actual_in_nbytes_ret,size_t *actual_out_nbytes_ret,
 	 enum libdeflate_decompress_stop_by stop_type,int* is_final_block_ret)
 {
+	struct libdeflate_decompressor * _d=d;
 	u8 *out_next = ((u8 *)out)+in_dict_nbytes;
 	u8 * const out_end = out_next + out_nbytes_avail;
 	u8 * const out_fastloop_end =
@@ -118,6 +172,7 @@ next_block:
 		STATIC_ASSERT(DEFLATE_NUM_PRECODE_SYMS == 4 + BITMASK(4));
 		num_explicit_precode_lens = 4 + ((bitbuf >> 13) & BITMASK(4));
 
+        d=_d;
 		d->static_codes_loaded = false;
 
 		/*
@@ -256,6 +311,11 @@ next_block:
 
 		/* Unnecessary, but check this for consistency with zlib. */
 		SAFETY_CHECK(i == num_litlen_syms + num_offset_syms);
+			
+		/* Decompressing a Huffman block (either dynamic) */
+
+		SAFETY_CHECK(build_offset_decode_table(d, num_litlen_syms, num_offset_syms));
+		SAFETY_CHECK(build_litlen_decode_table(d, num_litlen_syms, num_offset_syms));
 
 	} else if (block_type == DEFLATE_BLOCKTYPE_UNCOMPRESSED) {
 		u16 len, nlen;
@@ -310,35 +370,13 @@ next_block:
 		bitbuf >>= 3; /* for BTYPE and BFINAL */
 		bitsleft -= 3;
 
-		if (d->static_codes_loaded)
-			goto have_decode_tables;
-
-		d->static_codes_loaded = true;
-
-		STATIC_ASSERT(DEFLATE_NUM_LITLEN_SYMS == 288);
-		STATIC_ASSERT(DEFLATE_NUM_OFFSET_SYMS == 32);
-
-		for (i = 0; i < 144; i++)
-			d->u.l.lens[i] = 8;
-		for (; i < 256; i++)
-			d->u.l.lens[i] = 9;
-		for (; i < 280; i++)
-			d->u.l.lens[i] = 7;
-		for (; i < 288; i++)
-			d->u.l.lens[i] = 8;
-
-		for (; i < 288 + 32; i++)
-			d->u.l.lens[i] = 5;
-
-		num_litlen_syms = 288;
-		num_offset_syms = 32;
+		if (!d->static_codes_loaded){
+            d=load_static_decoder(_d);
+            SAFETY_CHECK(d!=0);
+        	//assert(d.static_codes_loaded);
+        }
 	}
 
-	/* Decompressing a Huffman block (either dynamic or static) */
-
-	SAFETY_CHECK(build_offset_decode_table(d, num_litlen_syms, num_offset_syms));
-	SAFETY_CHECK(build_litlen_decode_table(d, num_litlen_syms, num_offset_syms));
-have_decode_tables:
 	litlen_tablemask = BITMASK(d->litlen_tablebits);
 
 	/*
