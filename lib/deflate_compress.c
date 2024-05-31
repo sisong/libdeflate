@@ -470,8 +470,10 @@ struct libdeflate_compressor {
 	/* The compression level with which this compressor was created */
 	unsigned compression_level;
 	bool     in_is_final_block;
+	bool     lazy2;
 	unsigned bitcount_back_for_block;
 	bitbuf_t bitbuf_back_for_block;
+	size_t   dictpos_for_block_continue;
 
 	/* Anything of this size or less we won't bother trying to compress. */
 	size_t max_passthrough_size;
@@ -2650,7 +2652,7 @@ deflate_compress_greedy(struct libdeflate_compressor * restrict c,
 static void
 deflate_compress_lazy_generic(struct libdeflate_compressor * restrict c,
 			      const u8 *in_block_with_dict,size_t dict_nbytes, size_t in_nbytes,
-			      struct deflate_output_bitstream *os, bool lazy2)
+			      struct deflate_output_bitstream *os)
 {
 	const u8 *in_next = in_block_with_dict+dict_nbytes;
 	const u8 *in_end = in_next + in_nbytes;
@@ -2789,7 +2791,7 @@ have_cur_match:
 				goto have_cur_match;
 			}
 
-			if (lazy2) {
+			if (c->lazy2) {
 				/* In lazy2 mode, look ahead another position */
 				adjust_max_and_nice_len(&max_len, &nice_len,
 							in_end - in_next);
@@ -2859,32 +2861,6 @@ have_cur_match:
 				     in_next - in_block_begin,
 				     c->p.g.sequences, in_next == in_end);
 	} while (in_next != in_end && !os->overflow);
-}
-
-/*
- * This is the "lazy" DEFLATE compressor.  Before choosing a match, it checks to
- * see if there's a better match at the next position.  If yes, it outputs a
- * literal and continues to the next position.  If no, it outputs the match.
- */
-static void
-deflate_compress_lazy(struct libdeflate_compressor * restrict c,
-		      const u8 *in_block_with_dict,size_t dict_nbytes, size_t in_nbytes,
-		      struct deflate_output_bitstream *os)
-{
-	deflate_compress_lazy_generic(c, in_block_with_dict,dict_nbytes, in_nbytes, os, false);
-}
-
-/*
- * The lazy2 compressor.  This is similar to the regular lazy one, but it looks
- * for a better match at the next 2 positions rather than the next 1.  This
- * makes it take slightly more time, but compress some inputs slightly more.
- */
-static void
-deflate_compress_lazy2(struct libdeflate_compressor * restrict c,
-		       const u8 *in_block_with_dict,size_t dict_nbytes, size_t in_nbytes,
-		       struct deflate_output_bitstream *os)
-{
-	deflate_compress_lazy_generic(c, in_block_with_dict,dict_nbytes, in_nbytes, os, true);
 }
 
 #if SUPPORT_NEAR_OPTIMAL_PARSING
@@ -4025,6 +4001,7 @@ libdeflate_alloc_compressor_ex(int compression_level,
 	c->compression_level = compression_level;
 	c->in_is_final_block = false;
 	_compress_block_init(c);
+	c->dictpos_for_block_continue=0;
 
 	/*
 	 * The higher the compression level, the more we should bother trying to
@@ -4058,22 +4035,26 @@ libdeflate_alloc_compressor_ex(int compression_level,
 		c->nice_match_length = 30;
 		break;
 	case 5:
-		c->impl = deflate_compress_lazy;
+		c->impl = deflate_compress_lazy_generic;
+		c->lazy2 = false;
 		c->max_search_depth = 16;
 		c->nice_match_length = 30;
 		break;
 	case 6:
-		c->impl = deflate_compress_lazy;
+		c->impl = deflate_compress_lazy_generic;
+		c->lazy2 = false;
 		c->max_search_depth = 35;
 		c->nice_match_length = 65;
 		break;
 	case 7:
-		c->impl = deflate_compress_lazy;
+		c->impl = deflate_compress_lazy_generic;
+		c->lazy2 = false;
 		c->max_search_depth = 100;
 		c->nice_match_length = 130;
 		break;
 	case 8:
-		c->impl = deflate_compress_lazy2;
+		c->impl = deflate_compress_lazy_generic;
+		c->lazy2 = true;
 		c->max_search_depth = 300;
 		c->nice_match_length = DEFLATE_MAX_MATCH_LEN;
 		break;
@@ -4081,7 +4062,8 @@ libdeflate_alloc_compressor_ex(int compression_level,
 #if !SUPPORT_NEAR_OPTIMAL_PARSING
 	default:
 #endif
-		c->impl = deflate_compress_lazy2;
+		c->impl = deflate_compress_lazy_generic;
+		c->lazy2 = true;
 		c->max_search_depth = 600;
 		c->nice_match_length = DEFLATE_MAX_MATCH_LEN;
 		break;

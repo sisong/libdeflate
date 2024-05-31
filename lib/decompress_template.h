@@ -353,8 +353,6 @@ next_block:
 		goto block_done;
 
 	} else {
-		unsigned i;
-
 		SAFETY_CHECK(block_type == DEFLATE_BLOCKTYPE_STATIC_HUFFMAN);
 
 		/*
