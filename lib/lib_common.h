@@ -35,7 +35,9 @@
 #  define LIBDEFLATE_ALIGN_STACK
 #endif
 
+#ifndef LIBDEFLATEAPI
 #define LIBDEFLATEAPI	LIBDEFLATE_EXPORT_SYM LIBDEFLATE_ALIGN_STACK
+#endif
 
 #include "../common_defs.h"
 

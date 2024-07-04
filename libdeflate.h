@@ -140,6 +140,22 @@ libdeflate_deflate_compress_block(struct libdeflate_compressor *compressor,
 			    void *out_part, size_t out_part_nbytes_avail,int out_is_flush_to_byte_align);
 
 /*
+ * continue compress muti blocks by muti times
+ * note:
+ *   current dict_nbytes must be equal to the previous dict_nbytes+in_block_nbytes, 
+ *   and current in_block_with_dict[0..dict_nbytes]'s last 32KB values must be equal to the previous 
+ *   in_block_with_dict[0..dict_nbytes+in_block_nbytes]'s values.
+ */
+LIBDEFLATEAPI size_t
+libdeflate_deflate_compress_block_continue(struct libdeflate_compressor *compressor,
+			    const void *in_block_with_dict,size_t dict_nbytes,size_t in_block_nbytes,
+				size_t in_border_nbytes,int in_is_final_block,
+			    void *out_part, size_t out_part_nbytes_avail,int out_is_flush_to_byte_align);
+
+LIBDEFLATEAPI void
+libdeflate_deflate_compress_block_reset(struct libdeflate_compressor *compressor);
+
+/*
  * Large stream data can be compress by calling libdeflate_deflate_compress_block() 
  * multiple times. 
  * libdeflate_deflate_compress_bound_block(in_block_nbytes) can got the upper limit of 
@@ -147,6 +163,7 @@ libdeflate_deflate_compress_block(struct libdeflate_compressor *compressor,
  */
 LIBDEFLATEAPI size_t
 libdeflate_deflate_compress_bound_block(size_t in_block_nbytes);
+
 /*
  * Large stream data can be compress by calling libdeflate_deflate_compress_block() 
  * multiple times. 

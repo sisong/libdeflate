@@ -808,6 +808,7 @@ block_done:
 		} break;
 	}
 
+	d=_d;
 	/* That was the last block. */
 	if (is_final_block_ret)
 		*is_final_block_ret=is_final_block;

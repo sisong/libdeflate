@@ -462,7 +462,7 @@ struct libdeflate_compressor {
 
 	/* Pointer to the compress() implementation chosen at allocation time */
 	void (*impl)(struct libdeflate_compressor *restrict c,const u8* in_block_with_dict,size_t dict_nbytes,
-		     size_t in_nbytes, struct deflate_output_bitstream *os);
+		     size_t in_nbytes,size_t in_border_nbytes,struct deflate_output_bitstream *os);
 
 	/* The free() function for this struct, chosen at allocation time */
 	free_func_t free_func;
@@ -473,7 +473,10 @@ struct libdeflate_compressor {
 	bool     lazy2;
 	unsigned bitcount_back_for_block;
 	bitbuf_t bitbuf_back_for_block;
-	size_t   dictpos_for_block_continue;
+	size_t   dict_pos_for_blocks_continue;
+	size_t   slide_pos_for_blocks_continue;
+	u32 	 next_hashes_for_blocks_continue0;
+	u32 	 next_hashes_for_blocks_continue1;
 
 	/* Anything of this size or less we won't bother trying to compress. */
 	size_t max_passthrough_size;
@@ -673,9 +676,11 @@ struct libdeflate_compressor {
 	} p; /* (p)arser */
 };
 
-static forceinline void _compress_block_init(struct libdeflate_compressor* c){
+static forceinline void _compress_block_reset(struct libdeflate_compressor* c){
 	c->bitbuf_back_for_block=0;
 	c->bitcount_back_for_block=0;
+	c->dict_pos_for_blocks_continue=~(size_t)0;
+	c->slide_pos_for_blocks_continue=0;
 }
 
 /*
@@ -2483,22 +2488,35 @@ deflate_compress_none(const u8 *in, size_t in_nbytes,
 static void
 deflate_compress_fastest(struct libdeflate_compressor * restrict c,
 			 const u8* in_block_with_dict,size_t dict_nbytes, size_t in_nbytes,
-			 struct deflate_output_bitstream *os)
+			 size_t in_border_nbytes,struct deflate_output_bitstream *os)
 {
 	const u8 *in_next = in_block_with_dict+dict_nbytes;
 	const u8 *in_end = in_next + in_nbytes;
+	const u8* in_border_end= in_end + in_border_nbytes;
 	const u8 *in_cur_base = in_block_with_dict;
+	size_t   dict_nbytes_continue;
 	unsigned max_len = DEFLATE_MAX_MATCH_LEN;
 	unsigned nice_len = MIN(c->nice_match_length, max_len);
-	u32 next_hash = 0;
+	u32 next_hash;
 
-	ht_matchfinder_init(&c->p.f.ht_mf);
-	if (dict_nbytes>0){
+	if (c->dict_pos_for_blocks_continue == ~(size_t)0){
+		dict_nbytes_continue=0;
+		next_hash=0;
+		ht_matchfinder_init(&c->p.f.ht_mf);
+	}else{
+		dict_nbytes_continue=dict_nbytes - c->dict_pos_for_blocks_continue;
+		next_hash=c->next_hashes_for_blocks_continue0;
+		ASSERT(c->slide_pos_for_blocks_continue<=MATCHFINDER_WINDOW_SIZE);
+		in_cur_base=in_block_with_dict+dict_nbytes - c->slide_pos_for_blocks_continue;
+	}
+
+	if (dict_nbytes > dict_nbytes_continue){
+		ASSERT(dict_nbytes-dict_nbytes_continue<=MATCHFINDER_WINDOW_SIZE);
 		ht_matchfinder_skip_bytes(&c->p.f.ht_mf,
 						&in_cur_base,
-						in_cur_base,
-						in_end,
-						dict_nbytes,
+						in_cur_base+dict_nbytes_continue,
+						in_border_end,
+						dict_nbytes-dict_nbytes_continue,
 						&next_hash);
 	}
 
@@ -2515,15 +2533,16 @@ deflate_compress_fastest(struct libdeflate_compressor * restrict c,
 		do {
 			u32 length;
 			u32 offset;
-			size_t remaining = in_end - in_next;
+			size_t remaining = in_border_end - in_next;
+			size_t length_limit = in_end - in_next;
 
 			if (unlikely(remaining < DEFLATE_MAX_MATCH_LEN)) {
 				max_len = remaining;
-				if (max_len < HT_MATCHFINDER_REQUIRED_NBYTES) {
+				if (unlikely(length_limit<HT_MATCHFINDER_REQUIRED_NBYTES)){
 					do {
 						deflate_choose_literal(c,
 							*in_next++, false, seq);
-					} while (--max_len);
+					} while (--length_limit);
 					break;
 				}
 				nice_len = MIN(nice_len, max_len);
@@ -2535,14 +2554,15 @@ deflate_compress_fastest(struct libdeflate_compressor * restrict c,
 							      nice_len,
 							      &next_hash,
 							      &offset);
-			if (length) {
+			length=MIN(length_limit,length);
+			if (length>=HT_MATCHFINDER_MIN_MATCH_LEN) {
 				/* Match found */
 				deflate_choose_match(c, length, offset, false,
 						     &seq);
 				ht_matchfinder_skip_bytes(&c->p.f.ht_mf,
 							  &in_cur_base,
 							  in_next + 1,
-							  in_end,
+							  in_border_end,
 							  length - 1,
 							  &next_hash);
 				in_next += length;
@@ -2560,6 +2580,8 @@ deflate_compress_fastest(struct libdeflate_compressor * restrict c,
 				     in_next - in_block_begin,
 				     c->p.f.sequences, in_next == in_end);
 	} while (in_next != in_end && !os->overflow);
+	c->next_hashes_for_blocks_continue0=next_hash;
+	c->slide_pos_for_blocks_continue=in_end-in_cur_base;
 }
 
 /*
@@ -2568,22 +2590,35 @@ deflate_compress_fastest(struct libdeflate_compressor * restrict c,
 static void
 deflate_compress_greedy(struct libdeflate_compressor * restrict c,
 			const u8* in_block_with_dict,size_t dict_nbytes, size_t in_nbytes,
-			struct deflate_output_bitstream *os)
+			size_t in_border_nbytes,struct deflate_output_bitstream *os)
 {
 	const u8 *in_next = in_block_with_dict+dict_nbytes;
 	const u8 *in_end = in_next + in_nbytes;
+	const u8* in_border_end= in_end + in_border_nbytes;
 	const u8 *in_cur_base = in_block_with_dict;
+	size_t   dict_nbytes_continue;
 	unsigned max_len = DEFLATE_MAX_MATCH_LEN;
 	unsigned nice_len = MIN(c->nice_match_length, max_len);
-	u32 next_hashes[2] = {0, 0};
+	u32 next_hashes[2];
 
-	hc_matchfinder_init(&c->p.g.hc_mf);
-	if (dict_nbytes>0){
+	if (c->dict_pos_for_blocks_continue == ~(size_t)0){
+		dict_nbytes_continue=0;
+		next_hashes[0]=0;
+		next_hashes[1]=0;
+		hc_matchfinder_init(&c->p.g.hc_mf);
+	}else{
+		dict_nbytes_continue=dict_nbytes - c->dict_pos_for_blocks_continue;
+		next_hashes[0]=c->next_hashes_for_blocks_continue0;
+		next_hashes[1]=c->next_hashes_for_blocks_continue1;
+		ASSERT(c->slide_pos_for_blocks_continue<=MATCHFINDER_WINDOW_SIZE);
+		in_cur_base=in_block_with_dict+dict_nbytes - c->slide_pos_for_blocks_continue;
+	}
+	if (dict_nbytes > dict_nbytes_continue){
 		hc_matchfinder_skip_bytes(&c->p.g.hc_mf,
 						&in_cur_base,
-						in_cur_base,
-						in_end,
-						dict_nbytes,
+						in_cur_base+dict_nbytes_continue,
+						in_border_end,
+						dict_nbytes-dict_nbytes_continue,
 						next_hashes);
 	}
 
@@ -2604,9 +2639,10 @@ deflate_compress_greedy(struct libdeflate_compressor * restrict c,
 		do {
 			u32 length;
 			u32 offset;
+			const size_t length_limit = in_end - in_next;
 
 			adjust_max_and_nice_len(&max_len, &nice_len,
-						in_end - in_next);
+						in_border_end - in_next);
 			length = hc_matchfinder_longest_match(
 						&c->p.g.hc_mf,
 						&in_cur_base,
@@ -2617,7 +2653,7 @@ deflate_compress_greedy(struct libdeflate_compressor * restrict c,
 						c->max_search_depth,
 						next_hashes,
 						&offset);
-
+			length=MIN(length_limit,length);
 			if (length >= min_len &&
 			    (length > DEFLATE_MIN_MATCH_LEN ||
 			     offset <= 4096)) {
@@ -2627,7 +2663,7 @@ deflate_compress_greedy(struct libdeflate_compressor * restrict c,
 				hc_matchfinder_skip_bytes(&c->p.g.hc_mf,
 							  &in_cur_base,
 							  in_next + 1,
-							  in_end,
+							  in_border_end,
 							  length - 1,
 							  next_hashes);
 				in_next += length;
@@ -2647,27 +2683,43 @@ deflate_compress_greedy(struct libdeflate_compressor * restrict c,
 				     in_next - in_block_begin,
 				     c->p.g.sequences, in_next == in_end);
 	} while (in_next != in_end && !os->overflow);
+	c->next_hashes_for_blocks_continue0=next_hashes[0];
+	c->next_hashes_for_blocks_continue1=next_hashes[1];
+	c->slide_pos_for_blocks_continue=in_end-in_cur_base;
 }
 
 static void
 deflate_compress_lazy_generic(struct libdeflate_compressor * restrict c,
 			      const u8 *in_block_with_dict,size_t dict_nbytes, size_t in_nbytes,
-			      struct deflate_output_bitstream *os)
+			      size_t in_border_nbytes,struct deflate_output_bitstream *os)
 {
 	const u8 *in_next = in_block_with_dict+dict_nbytes;
 	const u8 *in_end = in_next + in_nbytes;
+	const u8* in_border_end= in_end + in_border_nbytes;
 	const u8 *in_cur_base = in_block_with_dict;
+	size_t   dict_nbytes_continue;
 	unsigned max_len = DEFLATE_MAX_MATCH_LEN;
 	unsigned nice_len = MIN(c->nice_match_length, max_len);
-	u32 next_hashes[2] = {0, 0};
+	u32 next_hashes[2];
 
-	hc_matchfinder_init(&c->p.g.hc_mf);
-	if (dict_nbytes>0){
+	if (c->dict_pos_for_blocks_continue == ~(size_t)0){
+		dict_nbytes_continue=0;
+		next_hashes[0]=0;
+		next_hashes[1]=0;
+		hc_matchfinder_init(&c->p.g.hc_mf);
+	}else{
+		dict_nbytes_continue=dict_nbytes - c->dict_pos_for_blocks_continue;
+		next_hashes[0]=c->next_hashes_for_blocks_continue0;
+		next_hashes[1]=c->next_hashes_for_blocks_continue1;
+		ASSERT(c->slide_pos_for_blocks_continue<=MATCHFINDER_WINDOW_SIZE);
+		in_cur_base=in_block_with_dict+dict_nbytes - c->slide_pos_for_blocks_continue;
+	}
+	if (dict_nbytes > dict_nbytes_continue){
 		hc_matchfinder_skip_bytes(&c->p.g.hc_mf,
 						&in_cur_base,
-						in_cur_base,
-						in_end,
-						dict_nbytes,
+						in_cur_base+dict_nbytes_continue,
+						in_border_end,
+						dict_nbytes-dict_nbytes_continue,
 						next_hashes);
 	}
 
@@ -2692,6 +2744,7 @@ deflate_compress_lazy_generic(struct libdeflate_compressor * restrict c,
 			unsigned cur_offset;
 			unsigned next_len;
 			unsigned next_offset;
+			size_t length_limit = in_end - in_next;
 
 			/*
 			 * Recalculate the minimum match length if it hasn't
@@ -2708,7 +2761,7 @@ deflate_compress_lazy_generic(struct libdeflate_compressor * restrict c,
 
 			/* Find the longest match at the current position. */
 			adjust_max_and_nice_len(&max_len, &nice_len,
-						in_end - in_next);
+						in_border_end - in_next);
 			cur_len = hc_matchfinder_longest_match(
 						&c->p.g.hc_mf,
 						&in_cur_base,
@@ -2719,6 +2772,7 @@ deflate_compress_lazy_generic(struct libdeflate_compressor * restrict c,
 						c->max_search_depth,
 						next_hashes,
 						&cur_offset);
+			cur_len=MIN(length_limit,cur_len);
 			if (cur_len < min_len ||
 			    (cur_len == DEFLATE_MIN_MATCH_LEN &&
 			     cur_offset > 8192)) {
@@ -2740,7 +2794,7 @@ have_cur_match:
 				hc_matchfinder_skip_bytes(&c->p.g.hc_mf,
 							  &in_cur_base,
 							  in_next,
-							  in_end,
+							  in_border_end,
 							  cur_len - 1,
 							  next_hashes);
 				in_next += cur_len - 1;
@@ -2764,7 +2818,8 @@ have_cur_match:
 			 * each.
 			 */
 			adjust_max_and_nice_len(&max_len, &nice_len,
-						in_end - in_next);
+						in_border_end - in_next);
+			length_limit = in_end - in_next;
 			next_len = hc_matchfinder_longest_match(
 						&c->p.g.hc_mf,
 						&in_cur_base,
@@ -2775,6 +2830,7 @@ have_cur_match:
 						c->max_search_depth >> 1,
 						next_hashes,
 						&next_offset);
+			next_len=MIN(length_limit,next_len);
 			if (next_len >= cur_len &&
 			    4 * (int)(next_len - cur_len) +
 			    ((int)bsr32(cur_offset) -
@@ -2794,7 +2850,8 @@ have_cur_match:
 			if (c->lazy2) {
 				/* In lazy2 mode, look ahead another position */
 				adjust_max_and_nice_len(&max_len, &nice_len,
-							in_end - in_next);
+							in_border_end - in_next);
+				length_limit = in_end - in_next;
 				next_len = hc_matchfinder_longest_match(
 						&c->p.g.hc_mf,
 						&in_cur_base,
@@ -2805,6 +2862,7 @@ have_cur_match:
 						c->max_search_depth >> 2,
 						next_hashes,
 						&next_offset);
+				next_len=MIN(length_limit,next_len);
 				if (next_len >= cur_len &&
 				    4 * (int)(next_len - cur_len) +
 				    ((int)bsr32(cur_offset) -
@@ -2831,7 +2889,7 @@ have_cur_match:
 					hc_matchfinder_skip_bytes(&c->p.g.hc_mf,
 								  &in_cur_base,
 								  in_next,
-								  in_end,
+								  in_border_end,
 								  cur_len - 3,
 								  next_hashes);
 					in_next += cur_len - 3;
@@ -2846,7 +2904,7 @@ have_cur_match:
 				hc_matchfinder_skip_bytes(&c->p.g.hc_mf,
 							  &in_cur_base,
 							  in_next,
-							  in_end,
+							  in_border_end,
 							  cur_len - 2,
 							  next_hashes);
 				in_next += cur_len - 2;
@@ -2861,6 +2919,9 @@ have_cur_match:
 				     in_next - in_block_begin,
 				     c->p.g.sequences, in_next == in_end);
 	} while (in_next != in_end && !os->overflow);
+	c->next_hashes_for_blocks_continue0=next_hashes[0];
+	c->next_hashes_for_blocks_continue1=next_hashes[1];
+	c->slide_pos_for_blocks_continue=in_end-in_cur_base;
 }
 
 #if SUPPORT_NEAR_OPTIMAL_PARSING
@@ -3606,6 +3667,19 @@ deflate_near_optimal_clear_old_stats(struct libdeflate_compressor *c)
 	memset(c->p.n.match_len_freqs, 0, sizeof(c->p.n.match_len_freqs));
 }
 
+
+
+#define _DEF_near_optimal_init_dict() {	\
+			next_hashes[0]=0; next_hashes[1]=0; \
+			bt_matchfinder_init(&c->p.n.bt_mf);	\
+			deflate_near_optimal_init_stats(c); }
+
+#define _DEF_near_optimal_next_slide()  { in_next_slide = in_cur_base + MATCHFINDER_WINDOW_SIZE; }
+#define _DEF_near_optimal_slide(isSlideWindow)	{	\
+			if (isSlideWindow) bt_matchfinder_slide_window(&c->p.n.bt_mf);	\
+			in_cur_base = in_next;		\
+			_DEF_near_optimal_next_slide();		}
+
 /*
  * This is the "near-optimal" DEFLATE compressor.  It computes the optimal
  * representation of each DEFLATE block using a minimum-cost path search over
@@ -3622,81 +3696,57 @@ deflate_near_optimal_clear_old_stats(struct libdeflate_compressor *c)
 static void
 deflate_compress_near_optimal(struct libdeflate_compressor * restrict c,
 			      const u8 *in_block_with_dict,size_t dict_nbytes, size_t in_nbytes,
-			      struct deflate_output_bitstream *os)
+			      size_t in_border_nbytes,struct deflate_output_bitstream *os)
 {
     const u8* in=in_block_with_dict;
-	const u8 *in_next = in;
-	const u8 *in_block_begin = in_next;
-	const u8 *in_end = in_next + dict_nbytes + in_nbytes;
-	const u8 *in_cur_base = in_block_with_dict;
-	const u8 *in_next_slide =
-		in_next + MIN(in_end - in_next, MATCHFINDER_WINDOW_SIZE);
+	const u8 *in_next;
+	const u8 *in_block_begin;
+	const u8 *in_end = in_block_with_dict + dict_nbytes + in_nbytes;
+	const u8* in_border_end= in_end + in_border_nbytes;
+	const u8 *in_cur_base=in_block_with_dict;
+	const u8 *in_next_slide;
+	size_t   dict_nbytes_continue;
 	unsigned max_len = DEFLATE_MAX_MATCH_LEN;
 	unsigned nice_len = MIN(c->nice_match_length, max_len);
 	struct lz_match *cache_ptr = c->p.n.match_cache;
-	u32 next_hashes[2] = {0, 0};
+	u32 next_hashes[2];
 	bool prev_block_used_only_literals = false;
 
-	bt_matchfinder_init(&c->p.n.bt_mf);
-	deflate_near_optimal_init_stats(c);
+	if (c->dict_pos_for_blocks_continue == ~(size_t)0){
+		dict_nbytes_continue=0;
+		_DEF_near_optimal_init_dict();
+	}else{
+		dict_nbytes_continue=dict_nbytes - c->dict_pos_for_blocks_continue;
+		next_hashes[0]=c->next_hashes_for_blocks_continue0;
+		next_hashes[1]=c->next_hashes_for_blocks_continue1;
+		ASSERT(c->slide_pos_for_blocks_continue<=MATCHFINDER_WINDOW_SIZE);
+		in_cur_base=in_block_with_dict+dict_nbytes - c->slide_pos_for_blocks_continue;
+	}
+	in_next=in_block_with_dict+dict_nbytes_continue;
+	_DEF_near_optimal_next_slide();
 
-	if (dict_nbytes>0){
-		const u8 * const in_max_block_end = in_block_begin + dict_nbytes; /* dict data as first block */
+	if (dict_nbytes>dict_nbytes_continue){
+		ASSERT(dict_nbytes-dict_nbytes_continue<=MATCHFINDER_WINDOW_SIZE);
+		const u8 * const in_max_block_end = in_next + dict_nbytes-dict_nbytes_continue;
 		for (;;) {
-			struct lz_match *matches;
-			unsigned best_len;
-			size_t remaining = in_end - in_next;
+			if (in_next == in_next_slide)
+				_DEF_near_optimal_slide(true);
 
-			if (in_next == in_next_slide) {
-				bt_matchfinder_slide_window(&c->p.n.bt_mf);
-				in_cur_base = in_next;
-				in_next_slide = in_next +
-					MIN(remaining, MATCHFINDER_WINDOW_SIZE);
-			}
-
-			matches = cache_ptr;
-			best_len = 0;
-			adjust_max_and_nice_len(&max_len, &nice_len, remaining);
-			if (likely(max_len >= BT_MATCHFINDER_REQUIRED_NBYTES)) {
-				cache_ptr = bt_matchfinder_get_matches(
-						&c->p.n.bt_mf,
-						in_cur_base,
-						in_next - in_cur_base,
-						max_len,
-						nice_len,
-						c->max_search_depth,
-						next_hashes,
-						matches);
-				if (cache_ptr > matches)
-					best_len = cache_ptr[-1].length;
-			}
-
-			cache_ptr->length = cache_ptr - matches;
-			cache_ptr->offset = *in_next;
+			adjust_max_and_nice_len(&max_len, &nice_len, in_border_end - in_next);
+			bt_matchfinder_skip_byte(
+					&c->p.n.bt_mf,
+					in_cur_base,
+					in_next - in_cur_base,
+					nice_len,
+					c->max_search_depth,
+					next_hashes);
 			in_next++;
-			cache_ptr++;
 			
 			if (in_next >= in_max_block_end)
 				break;
 		}
-
-		{
-			u32 block_length = in_next - in_block_begin;
-			bool is_first = (in_block_begin == in);
-			bool is_final = (in_next == in_end);
-
-			deflate_near_optimal_merge_stats(c);
-			deflate_optimize_and_flush_block(
-						c, os, in_block_begin,
-						block_length, cache_ptr,
-						is_first, is_final, true,
-						&prev_block_used_only_literals);
-			cache_ptr = &c->p.n.match_cache[0];
-			deflate_near_optimal_save_stats(c);
-			deflate_near_optimal_init_stats(c);
-			in_block_begin = in_next;
-		}
 	}
+	in_block_begin = in_next;
 
 	do {
 		/* Starting a new DEFLATE block */
@@ -3737,15 +3787,10 @@ deflate_compress_near_optimal(struct libdeflate_compressor * restrict c,
 		for (;;) {
 			struct lz_match *matches;
 			unsigned best_len;
-			size_t remaining = in_end - in_next;
 
 			/* Slide the window forward if needed. */
-			if (in_next == in_next_slide) {
-				bt_matchfinder_slide_window(&c->p.n.bt_mf);
-				in_cur_base = in_next;
-				in_next_slide = in_next +
-					MIN(remaining, MATCHFINDER_WINDOW_SIZE);
-			}
+			if (in_next == in_next_slide)
+				_DEF_near_optimal_slide(true);
 
 			/*
 			 * Find matches with the current position using the
@@ -3765,7 +3810,7 @@ deflate_compress_near_optimal(struct libdeflate_compressor * restrict c,
 			 */
 			matches = cache_ptr;
 			best_len = 0;
-			adjust_max_and_nice_len(&max_len, &nice_len, remaining);
+			adjust_max_and_nice_len(&max_len, &nice_len, in_border_end - in_next);
 			if (likely(max_len >= BT_MATCHFINDER_REQUIRED_NBYTES)) {
 				cache_ptr = bt_matchfinder_get_matches(
 						&c->p.n.bt_mf,
@@ -3776,8 +3821,10 @@ deflate_compress_near_optimal(struct libdeflate_compressor * restrict c,
 						c->max_search_depth,
 						next_hashes,
 						matches);
-				if (cache_ptr > matches)
-					best_len = cache_ptr[-1].length;
+				if (cache_ptr > matches){
+					const size_t length_limit = in_end - in_next;
+					best_len=MIN(cache_ptr[-1].length,length_limit);
+				}
 			}
 			if (in_next >= next_observation) {
 				if (best_len >= min_len) {
@@ -3813,18 +3860,11 @@ deflate_compress_near_optimal(struct libdeflate_compressor * restrict c,
 			    best_len >= nice_len) {
 				--best_len;
 				do {
-					remaining = in_end - in_next;
-					if (in_next == in_next_slide) {
-						bt_matchfinder_slide_window(
-							&c->p.n.bt_mf);
-						in_cur_base = in_next;
-						in_next_slide = in_next +
-							MIN(remaining,
-							    MATCHFINDER_WINDOW_SIZE);
-					}
+					if (in_next == in_next_slide)
+						_DEF_near_optimal_slide(true);
 					adjust_max_and_nice_len(&max_len,
 								&nice_len,
-								remaining);
+								in_border_end - in_next);
 					if (max_len >=
 					    BT_MATCHFINDER_REQUIRED_NBYTES) {
 						bt_matchfinder_skip_byte(
@@ -3935,6 +3975,9 @@ deflate_compress_near_optimal(struct libdeflate_compressor * restrict c,
 			in_block_begin = in_next;
 		}
 	} while (in_next != in_end && !os->overflow);
+	c->next_hashes_for_blocks_continue0=next_hashes[0];
+	c->next_hashes_for_blocks_continue1=next_hashes[1];
+	c->slide_pos_for_blocks_continue=in_end-in_cur_base;
 }
 
 /* Initialize c->p.n.offset_slot_full. */
@@ -4000,8 +4043,7 @@ libdeflate_alloc_compressor_ex(int compression_level,
 
 	c->compression_level = compression_level;
 	c->in_is_final_block = false;
-	_compress_block_init(c);
-	c->dictpos_for_block_continue=0;
+	_compress_block_reset(c);
 
 	/*
 	 * The higher the compression level, the more we should bother trying to
@@ -4122,8 +4164,8 @@ libdeflate_deflate_compress(struct libdeflate_compressor *c,
 			    const void *in, size_t in_nbytes,
 			    void *out, size_t out_nbytes_avail)
 {
-	_compress_block_init(c);
-	return libdeflate_deflate_compress_block(c,in,0,in_nbytes,true,out,out_nbytes_avail,false);
+	_compress_block_reset(c);
+	return libdeflate_deflate_compress_block_continue(c,in,0,in_nbytes,0,true,out,out_nbytes_avail,false);
 }
 
 
@@ -4164,16 +4206,27 @@ libdeflate_deflate_compress_block(struct libdeflate_compressor *c,
 			    const void *in_block_with_dict,size_t dict_nbytes,size_t in_nbytes,int in_is_final_block,
 			    void *out, size_t out_nbytes_avail,int out_is_flush_to_byte_align)
 {
+	c->dict_pos_for_blocks_continue=~(size_t)0;
+	return libdeflate_deflate_compress_block_continue(c,in_block_with_dict,dict_nbytes,in_nbytes,0,in_is_final_block,
+				out,out_nbytes_avail,out_is_flush_to_byte_align);
+}
+
+LIBDEFLATEAPI void
+libdeflate_deflate_compress_block_reset(struct libdeflate_compressor *c){
+	_compress_block_reset(c);
+}
+
+LIBDEFLATEAPI size_t
+libdeflate_deflate_compress_block_continue(struct libdeflate_compressor *c,
+			    const void *in_block_with_dict,size_t dict_nbytes,size_t in_nbytes,
+				size_t in_border_nbytes,int in_is_final_block,
+			    void *out, size_t out_nbytes_avail,int out_is_flush_to_byte_align){
 	struct deflate_output_bitstream os;
 	c->in_is_final_block=in_is_final_block?1:0;
 	os.bitbuf = c->bitbuf_back_for_block;
 	os.bitcount = c->bitcount_back_for_block;
-	_compress_block_init(c);
-
-	if (unlikely(dict_nbytes>MATCHFINDER_WINDOW_SIZE)){
-		in_block_with_dict=((const u8*)in_block_with_dict)+dict_nbytes-MATCHFINDER_WINDOW_SIZE;
-		dict_nbytes=MATCHFINDER_WINDOW_SIZE;
-	}
+	c->bitbuf_back_for_block=0;
+	c->bitcount_back_for_block=0;
 
 	/*
 	 * For extremely short inputs, or for compression level 0, just output
@@ -4181,16 +4234,27 @@ libdeflate_deflate_compress_block(struct libdeflate_compressor *c,
 	 */
 	if (unlikely(in_nbytes <= c->max_passthrough_size)){
 		const u8* in=((const u8*)in_block_with_dict)+dict_nbytes;
+		c->dict_pos_for_blocks_continue=(c->dict_pos_for_blocks_continue==~(size_t)0)?
+				(~(size_t)0) : (c->dict_pos_for_blocks_continue+in_nbytes);
+		c->slide_pos_for_blocks_continue+=in_nbytes;
+		c->dict_pos_for_blocks_continue=(c->slide_pos_for_blocks_continue>MATCHFINDER_WINDOW_SIZE)?
+				(~(size_t)0) : (c->dict_pos_for_blocks_continue);
 		return deflate_compress_none(in,in_nbytes,out,out_nbytes_avail,os.bitbuf,os.bitcount,c->in_is_final_block);
 	}
 
+	if (dict_nbytes>MATCHFINDER_WINDOW_SIZE){
+		in_block_with_dict=(const u8*)in_block_with_dict+dict_nbytes-MATCHFINDER_WINDOW_SIZE;
+		dict_nbytes=MATCHFINDER_WINDOW_SIZE;
+	}
+	
 	/* Initialize the output bitstream structure. */
 	os.next = out;
 	os.end = os.next + out_nbytes_avail;
 	os.overflow = false;
 
 	/* Call the actual compression function. */
-	(*c->impl)(c,in_block_with_dict,dict_nbytes,in_nbytes,&os);
+	(*c->impl)(c,in_block_with_dict,dict_nbytes,in_nbytes,in_border_nbytes,&os);
+	c->dict_pos_for_blocks_continue=0;
 
 	/* Return 0 if the output buffer is too small. */
 	if (os.overflow)
