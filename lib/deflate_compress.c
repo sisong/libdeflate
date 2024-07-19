@@ -4201,6 +4201,31 @@ static size_t _deflate_flush_to_byte_align(u8* out,size_t out_nbytes_avail,bitbu
 	}
 }
 
+
+
+LIBDEFLATEAPI size_t libdeflate_deflate_compress_get_state(struct libdeflate_compressor *c){
+	ASSERT(c->bitcount_back_for_block<=7);
+	ASSERT(c->bitbuf_back_for_block==(size_t)(c->bitbuf_back_for_block<<3>>3));
+	return (c->bitbuf_back_for_block<<3) | c->bitcount_back_for_block;
+}
+
+LIBDEFLATEAPI void libdeflate_deflate_compress_set_state(struct libdeflate_compressor *c,size_t state){
+	c->bitcount_back_for_block=state&7;
+	c->bitbuf_back_for_block=state>>3;
+}
+
+LIBDEFLATEAPI size_t
+libdeflate_deflate_compress_block_uncompressed(struct libdeflate_compressor *c,
+				const void *in_block,size_t in_nbytes,int in_is_final_block,
+			    void *out, size_t out_nbytes_avail){
+	struct deflate_output_bitstream os;
+	c->in_is_final_block=in_is_final_block?1:0;
+	os.bitbuf = c->bitbuf_back_for_block;
+	os.bitcount = c->bitcount_back_for_block;
+	_compress_block_reset(c);
+	return deflate_compress_none(in_block,in_nbytes,out,out_nbytes_avail,os.bitbuf,os.bitcount,c->in_is_final_block);
+}
+
 LIBDEFLATEAPI size_t
 libdeflate_deflate_compress_block(struct libdeflate_compressor *c,
 			    const void *in_block_with_dict,size_t dict_nbytes,size_t in_nbytes,int in_is_final_block,

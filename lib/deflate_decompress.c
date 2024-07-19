@@ -1144,6 +1144,17 @@ libdeflate_deflate_decompress_block(struct libdeflate_decompressor *d,
 						   actual_in_nbytes_ret, actual_out_nbytes_ret, stop_type, is_final_block_ret);
 }
 
+LIBDEFLATEAPI size_t libdeflate_deflate_decompress_get_state(struct libdeflate_decompressor *d){
+	ASSERT(d->bitsleft_back<=7);
+	ASSERT(d->bitbuf_back==(size_t)(d->bitbuf_back<<3>>3));
+	return (d->bitbuf_back<<3) | d->bitsleft_back;
+}
+
+LIBDEFLATEAPI void libdeflate_deflate_decompress_set_state(struct libdeflate_decompressor *d,size_t state){
+	d->bitsleft_back=state&7;
+	d->bitbuf_back=state>>3;
+}
+
 LIBDEFLATEAPI void
 libdeflate_deflate_decompress_block_reset(struct libdeflate_decompressor *d){
     _decompress_block_init(d);
