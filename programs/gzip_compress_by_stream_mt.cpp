@@ -10,9 +10,9 @@
 #include "gzip_compress_by_stream_mt.h"
 #include <assert.h>
 namespace {
-
 static const size_t kDictSize  = (1<<15); //MATCHFINDER_WINDOW_SIZE
-static const size_t kStepSize_min =128;
+static const size_t kStepSize_better= (size_t)1024*1024*2; //required O(kStepSize_better*thread_num) memory;
+static const size_t kStepSize_min =(size_t)1024*256;
 #define _check(v,_ret_errCode) do { if (!(v)) {err_code=_ret_errCode; goto _out; } } while (0)
 static inline size_t _dictSize_avail(u64 uncompressed_pos) {
                         return (uncompressed_pos<kDictSize)?(size_t)uncompressed_pos:kDictSize; }
@@ -237,14 +237,14 @@ static inline size_t _limitStepSize(u64 in_size,size_t in_step_size){
 
 } //namespace
 
-int gzip_compress_by_stream_mt(int compression_level,struct file_stream *in,u64 in_size,size_t in_step_size,
-                            struct file_stream *out,int thread_num,u64* actual_out_nbytes_ret){
+int gzip_compress_by_stream_mt(int compression_level,struct file_stream *in,u64 in_size,
+                               struct file_stream *out,int thread_num,u64* actual_out_nbytes_ret){
     int err_code=0;
     u8* pmem=0;
     struct libdeflate_compressor** c_list=0;
     uint32_t     in_crc=0;
     u64 out_cur=0;
-    in_step_size=_limitStepSize(in_size,in_step_size);
+    size_t in_step_size=_limitStepSize(in_size,kStepSize_better);
     const u64 _allWorkCount=(in_size+in_step_size-1)/in_step_size;
     thread_num=(thread_num<=1)?1:((thread_num<_allWorkCount)?thread_num:_allWorkCount);
     size_t workBufCount=(thread_num<=1)?1:(thread_num+(thread_num-1)/2+1);
@@ -288,7 +288,7 @@ int gzip_compress_by_stream_mt(int compression_level,struct file_stream *in,u64 
 
             //compress the block
             size_t code_nbytes=libdeflate_deflate_compress_block(c,pdata,dict_size,in_nbytes,is_final_block,
-                                                              pcode,block_bound,is_byte_align);
+                                                                 pcode,block_bound,is_byte_align);
             _check(code_nbytes>0, LIBDEFLATE_ENSTREAM_COMPRESS_BLOCK_ERROR);
 
             //write the block's code

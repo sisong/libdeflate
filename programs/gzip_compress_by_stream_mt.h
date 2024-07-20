@@ -27,11 +27,10 @@ enum libdeflate_enstream_result{
 };
 
 //compress gzip by stream & multi-thread
-//  required O(in_step_size*thread_num) memory;
 //  actual_out_nbytes_ret can NULL;
 //	return value is libdeflate_enstream_result.
-int gzip_compress_by_stream_mt(int compression_level,struct file_stream *in,u64 in_size,size_t in_step_size,
-                            struct file_stream *out,int thread_num,u64* actual_out_nbytes_ret);
+int gzip_compress_by_stream_mt(int compression_level,struct file_stream *in,u64 in_size,
+                               struct file_stream *out,int thread_num,u64* actual_out_nbytes_ret);
 
 #ifdef __cplusplus
 }
