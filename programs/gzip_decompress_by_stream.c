@@ -36,16 +36,13 @@ static inline size_t _limitMaxDefBSize(size_t maxDeflateBlockSize){
     return maxDeflateBlockSize;
 }
 
-#define _free_swap_buf(oldBuf_,newBuf_) do{ free(oldBuf_); oldBuf_=newBuf_; newBuf_=0; }while(0)
-
 int gzip_decompress_by_stream(struct libdeflate_decompressor *d,
-	                        struct file_stream *in, u64 in_size,struct file_stream *out,
-							u64* _actual_in_nbytes_ret,u64* _actual_out_nbytes_ret){
+							  struct file_stream *in, u64 in_size,struct file_stream *out,
+							  u64* _actual_in_nbytes_ret,u64* _actual_out_nbytes_ret){
     int err_code=0;
     u8* data_buf=0;
     u8* code_buf=0;
-    u8* _data_buf=0;
-    u8* _code_buf=0;
+    u8* _dict_buf_back=0;
     u64    in_cur=0;
     u64    out_cur=0;
     size_t curDeflateBlockSize=kMaxDeflateBlockSize;
@@ -115,19 +112,27 @@ int gzip_decompress_by_stream(struct libdeflate_decompressor *d,
                 size_t _code_buf_size=(_curBlockSize<rem_in_size)?_curBlockSize:rem_in_size;
                 curBlockSize=_curBlockSize;
                 {
-                    _data_buf=(u8*)malloc(_data_buf_size);
-                    _check(_data_buf!=0, LIBDEFLATE_DESTREAM_MEM_ALLOC_ERROR);
-                    memcpy(_data_buf,data_buf,data_cur);
-                    _free_swap_buf(data_buf,_data_buf);
-                    data_buf_size=_data_buf_size;
+                    assert(data_cur==kDictSize);
+                    if (_dict_buf_back==0){
+                        _dict_buf_back=(u8*)malloc(kDictSize);
+                        _check(_dict_buf_back!=0, LIBDEFLATE_DESTREAM_MEM_ALLOC_ERROR);
+                    }
+                    memcpy(_dict_buf_back,data_buf,kDictSize);
+                    free(data_buf); data_buf=0;
                 }
                 if (_code_buf_size>code_buf_size){
-                    _code_buf=(u8*)malloc(_code_buf_size);
+                    u8* _code_buf=(u8*)realloc(code_buf,_code_buf_size);
                     _check(_code_buf!=0, LIBDEFLATE_DESTREAM_MEM_ALLOC_ERROR);
-                    memcpy(_code_buf+_code_buf_size-loaded_in_size,code_buf+code_cur,loaded_in_size);
-                    _free_swap_buf(code_buf,_code_buf);
+                    code_buf=_code_buf; _code_buf=0;
+                    memcpy(code_buf+_code_buf_size-loaded_in_size,code_buf+code_cur,loaded_in_size);
                     code_cur+=_code_buf_size-code_buf_size;
                     code_buf_size=_code_buf_size;
+                }
+                {
+                    data_buf=(u8*)malloc(_data_buf_size);
+                    _check(data_buf!=0, LIBDEFLATE_DESTREAM_MEM_ALLOC_ERROR);
+                    memcpy(data_buf,_dict_buf_back,kDictSize);
+                    data_buf_size=_data_buf_size;
                 }
             }else{ //decompress fail, can't increase buf
                 _check_d(ret);
@@ -162,8 +167,7 @@ int gzip_decompress_by_stream(struct libdeflate_decompressor *d,
 _out:
     if (data_buf) free(data_buf);
     if (code_buf) free(code_buf);
-    if (_data_buf) free(_data_buf);
-    if (_code_buf) free(_code_buf);
+    if (_dict_buf_back) free(_dict_buf_back);
     return err_code;
 }
 

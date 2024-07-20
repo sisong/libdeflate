@@ -21,8 +21,8 @@ enum libdeflate_destream_result{
 //  'out','actual_in_nbytes_ret','actual_out_nbytes_ret' can NULL;
 //	return value is libdeflate_result or libdeflate_destream_result.
 int gzip_decompress_by_stream(struct libdeflate_decompressor *decompressor,
-	                        struct file_stream *in, u64 in_size, struct file_stream *out,
-							u64* actual_in_nbytes_ret,u64* actual_out_nbytes_ret);
+							  struct file_stream *in, u64 in_size, struct file_stream *out,
+							  u64* actual_in_nbytes_ret,u64* actual_out_nbytes_ret);
 
 #ifdef __cplusplus
 }
