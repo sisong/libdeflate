@@ -40,8 +40,6 @@
 #  include <utime.h>
 #endif
 
-static const size_t kCompressStreamStepSize= (size_t)1024*1024*2;
-static const size_t kMaxDeflateBlockSize   = (size_t)1024*1024*8; 
 
 #define GZIP_MIN_HEADER_SIZE	10
 #define GZIP_FOOTER_SIZE	8
@@ -153,124 +151,6 @@ append_suffix(const tchar *path, const tchar *suffix)
 	tmemcpy(suffixed_path, path, path_len);
 	tmemcpy(&suffixed_path[path_len], suffix, suffix_len + 1);
 	return suffixed_path;
-}
-
-static int
-do_decompress(struct libdeflate_decompressor *decompressor,
-	      struct file_stream *in, struct file_stream *out,
-	      const struct options *options)
-{
-	const u8 *compressed_data = in->mmap_mem;
-	size_t compressed_size = in->mmap_size;
-	void *uncompressed_data = NULL;
-	size_t uncompressed_size;
-	size_t max_uncompressed_size;
-	size_t actual_in_nbytes;
-	size_t actual_out_nbytes;
-	enum libdeflate_result result;
-	int ret = 0;
-
-	if (compressed_size < GZIP_MIN_OVERHEAD ||
-	    compressed_data[0] != GZIP_ID1 ||
-	    compressed_data[1] != GZIP_ID2) {
-		if (options->force && options->to_stdout)
-			return full_write(out, compressed_data, compressed_size);
-		msg("%"TS": not in gzip format", in->name);
-		return -1;
-	}
-
-	/*
-	 * Use the ISIZE field as a hint for the decompressed data size.  It may
-	 * need to be increased later, however, because the file may contain
-	 * multiple gzip members and the particular ISIZE we happen to use may
-	 * not be the largest; or the real size may be >= 4 GiB, causing ISIZE
-	 * to overflow.  In any case, make sure to allocate at least one byte.
-	 */
-	uncompressed_size =
-		get_unaligned_le32(&compressed_data[compressed_size - 4]);
-	if (uncompressed_size == 0)
-		uncompressed_size = 1;
-
-	/*
-	 * DEFLATE cannot expand data more than 1032x, so there's no need to
-	 * ever allocate a buffer more than 1032 times larger than the
-	 * compressed data.  This is a fail-safe, albeit not a very good one, if
-	 * ISIZE becomes corrupted on a small file.  (The 1032x number comes
-	 * from each 2 bits generating a 258-byte match.  This is a hard upper
-	 * bound; the real upper bound is slightly smaller due to overhead.)
-	 */
-	if (compressed_size <= SIZE_MAX / 1032)
-		max_uncompressed_size = compressed_size * 1032;
-	else
-		max_uncompressed_size = SIZE_MAX;
-
-	do {
-		if (uncompressed_data == NULL) {
-			uncompressed_size = MIN(uncompressed_size,
-						max_uncompressed_size);
-			uncompressed_data = xmalloc(uncompressed_size);
-			if (uncompressed_data == NULL) {
-				msg("%"TS": file is probably too large to be "
-				    "processed by this program", in->name);
-				ret = -1;
-				goto out;
-			}
-		}
-
-		result = libdeflate_gzip_decompress_ex(decompressor,
-						       compressed_data,
-						       compressed_size,
-						       uncompressed_data,
-						       uncompressed_size,
-						       &actual_in_nbytes,
-						       &actual_out_nbytes);
-
-		if (result == LIBDEFLATE_INSUFFICIENT_SPACE) {
-			if (uncompressed_size >= max_uncompressed_size) {
-				msg("Bug in libdeflate_gzip_decompress_ex(): data expanded too much!");
-				ret = -1;
-				goto out;
-			}
-			if (uncompressed_size * 2 <= uncompressed_size) {
-				msg("%"TS": file corrupt or too large to be "
-				    "processed by this program", in->name);
-				ret = -1;
-				goto out;
-			}
-			uncompressed_size *= 2;
-			free(uncompressed_data);
-			uncompressed_data = NULL;
-			continue;
-		}
-
-		if (result != LIBDEFLATE_SUCCESS) {
-			msg("%"TS": file corrupt or not in gzip format",
-			    in->name);
-			ret = -1;
-			goto out;
-		}
-
-		if (actual_in_nbytes == 0 ||
-		    actual_in_nbytes > compressed_size ||
-		    actual_out_nbytes > uncompressed_size) {
-			msg("Bug in libdeflate_gzip_decompress_ex(): impossible actual_nbytes value!");
-			ret = -1;
-			goto out;
-		}
-
-		if (!options->test) {
-			ret = full_write(out, uncompressed_data, actual_out_nbytes);
-			if (ret != 0)
-				goto out;
-		}
-
-		compressed_data += actual_in_nbytes;
-		compressed_size -= actual_in_nbytes;
-
-	} while (compressed_size != 0);
-out:
-	free(uncompressed_data);
-	return ret;
 }
 
 static int
@@ -419,26 +299,7 @@ decompress_file(struct libdeflate_decompressor *decompressor, const tchar *path,
 	if (ret != 0)
 		goto out_close_in;
 
-    ret = gzip_decompress_by_stream(decompressor, kMaxDeflateBlockSize, &in, stbuf.st_size,
-									(options->test?0:&out), NULL, NULL);
-    if (ret==LIBDEFLATE_INSUFFICIENT_SPACE){
-        msg("decompress gzip by stream fail, deflate block size too large! try decompress in memory...\n");
-		if (lseek(in.fd,0,SEEK_SET)<0){
-			ret = -1;
-			goto out_close_out;
-		}
-		if (!options->test){
-			if (lseek(out.fd,0,SEEK_SET)<0){
-				ret = -1;
-				goto out_close_out;
-			}
-		}
-
-		ret = map_file_contents(&in, stbuf.st_size);
-		if (ret != 0)
-			goto out_close_out;
-        ret=do_decompress(decompressor, &in, &out, options);
-    }
+    ret = gzip_decompress_by_stream(decompressor, &in, stbuf.st_size,(options->test?0:&out), NULL, NULL);
 	if (ret != 0){
 		msg("\nERROR: gzip_decompress_by_stream() error code %d\n\n",ret);
 		goto out_close_out;
@@ -507,8 +368,7 @@ compress_file(int compression_level, const tchar *path,
 		goto out_close_out;
 	}
 
-	ret = gzip_compress_by_stream_mt(compression_level,&in,stbuf.st_size,kCompressStreamStepSize,
-									&out, options->thread_num, NULL);
+	ret = gzip_compress_by_stream_mt(compression_level, &in, stbuf.st_size,&out, options->thread_num, NULL);
 	if (ret != 0){
 		msg("\nERROR: gzip_compress_by_stream_mt() error code %d\n\n",ret);
 		goto out_close_out;
