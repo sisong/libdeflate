@@ -1,3 +1,99 @@
+# [stream_mt] added stream & multi-thread support for libdeflate
+Base on libdeflate, added support compress & decompress by stream, and added base API for support parallel compress.
+And at the same time, try to keep it simple and fast.
+See programs/pgzip.c, a demo of multi-thread compress and streaming compress & decompress, support large file, run fast & always uses limited memory.
+
+[stream_mt]:https://github.com/sisong/libdeflate/tree/stream-mt
+
+## benchmark
+### some files for compress&decompress testing:   
+| |file name|file original size|
+|----:|:----|----:|
+|1|Chrome_107.0.5304.122-x64-Stable.win.tar|278658560|
+|2|Emacs_28.2-universal.mac.tar|196380160|
+|3|gcc_12.2.0.src.tar|865884160|
+|4|jdk_x64_mac_openj9_16.0.1_9_openj9-0.26.0.tar|363765760|
+|5|linux_5.19.9.src.tar|1269637120|
+### test program version
+ zlib v1.3.1   
+ gzip in libdeflate v1.20   
+ pgzip in [stream_mt](https://github.com/sisong/libdeflate/tree/stream-mt) based on libdeflate v1.20   
+### test infos
+ PC: Windows11, CPU R9-7945HX, SSD PCIe4.0x4 4T, DDR5 5200MHz 32Gx2   
+ Only test deflate compress & decompress, no crc; build by vc2022;   
+ The time counted includes the time of read & write file data;   
+ `-9` means compressor run with compress level of 9;   
+ `-p-16` means compressor run with 16 threads;   
+### test result average
+|Program|C ratio|C ave. mem|C ave. speed|D ave. mem|D max mem|D ave. speed|
+|:----|----:|----:|----:|----:|----:|----:|
+|filecopy|100.000%|1.0M|2954.7MB/s|1.0M|1.0M|2862MB/s|
+|zlib-1|38.628%|1.4M|157.9MB/s|1.1M|1.1M|565MB/s|
+|zlib-2|37.820%|1.4M|147.3MB/s|1.1M|1.1M|583MB/s|
+|zlib-3|37.192%|1.3M|121.9MB/s|1.1M|1.1M|596MB/s|
+|zlib-4|36.070%|1.3M|106.0MB/s|1.1M|1.1M|596MB/s|
+|zlib-5|35.418%|1.3M|81.4MB/s|1.1M|1.1M|611MB/s|
+|zlib-6|35.112%|1.3M|56.9MB/s|1.1M|1.1M|618MB/s|
+|zlib-7|35.024%|1.3M|47.2MB/s|1.1M|1.1M|622MB/s|
+|zlib-8|34.945%|1.3M|32.1MB/s|1.1M|1.1M|631MB/s|
+|zlib-9|34.923%|1.3M|26.7MB/s|1.1M|1.1M|634MB/s|
+||
+|gzip -1|37.558%|570.9M|331.3MB/s|569.3M|1214.2M|763MB/s|
+|gzip -2|36.237%|571.3M|244.5MB/s|569.3M|1214.2M|766MB/s|
+|gzip -3|35.875%|571.3M|225.4MB/s|569.3M|1214.2M|772MB/s|
+|gzip -4|35.651%|571.3M|210.1MB/s|569.3M|1214.2M|780MB/s|
+|gzip -5|35.055%|571.3M|185.5MB/s|569.3M|1214.2M|782MB/s|
+|gzip -6|34.819%|571.3M|151.9MB/s|569.3M|1214.2M|780MB/s|
+|gzip -7|34.702%|571.3M|110.8MB/s|569.3M|1214.2M|776MB/s|
+|gzip -8|34.601%|571.3M|68.5MB/s|569.3M|1214.2M|772MB/s|
+|gzip -9|34.589%|571.3M|55.0MB/s|569.3M|1214.2M|771MB/s|
+|gzip -10|33.943%|579.3M|17.7MB/s|569.3M|1214.2M|783MB/s|
+|gzip -11|33.881%|579.3M|10.1MB/s|569.3M|1214.2M|786MB/s|
+|gzip -12|33.863%|579.3M|7.3MB/s|569.3M|1214.2M|786MB/s|
+||
+|pgzip -1 -p-1|37.558%|4.9M|346.1MB/s|1.3M|1.3M|1110MB/s|
+|pgzip -2 -p-1|36.237%|5.3M|260.4MB/s|1.7M|2.5M|1093MB/s|
+|pgzip -3 -p-1|35.875%|5.3M|239.5MB/s|1.6M|2.4M|1112MB/s|
+|pgzip -4 -p-1|35.650%|5.3M|221.2MB/s|1.4M|1.8M|1111MB/s|
+|pgzip -5 -p-1|35.055%|5.3M|193.7MB/s|1.4M|1.8M|1109MB/s|
+|pgzip -6 -p-1|34.820%|5.3M|156.4MB/s|1.6M|2.4M|1122MB/s|
+|pgzip -7 -p-1|34.703%|5.3M|113.0MB/s|1.7M|2.4M|1138MB/s|
+|pgzip -8 -p-1|34.602%|5.3M|69.7MB/s|1.6M|2.4M|1112MB/s|
+|pgzip -9 -p-1|34.589%|5.3M|55.8MB/s|1.7M|2.4M|1132MB/s|
+|pgzip -10 -p-1|33.943%|13.3M|16.7MB/s|1.6M|2.4M|1149MB/s|
+|pgzip -11 -p-1|33.883%|13.3M|9.2MB/s|1.6M|2.4M|1164MB/s|
+|pgzip -12 -p-1|33.865%|13.3M|6.5MB/s|1.5M|2.4M|1156MB/s|
+||
+|pgzip -1 -p-4|37.558%|25.9M|1309.6MB/s|1.3M|1.3M|1099MB/s|
+|pgzip -2 -p-4|36.237%|27.7M|979.5MB/s|1.6M|2.4M|1074MB/s|
+|pgzip -3 -p-4|35.875%|27.7M|902.5MB/s|1.6M|2.4M|1095MB/s|
+|pgzip -4 -p-4|35.651%|27.7M|839.7MB/s|1.4M|1.8M|1097MB/s|
+|pgzip -5 -p-4|35.055%|27.7M|733.1MB/s|1.4M|1.8M|1131MB/s|
+|pgzip -6 -p-4|34.820%|27.7M|598.4MB/s|1.6M|2.5M|1146MB/s|
+|pgzip -7 -p-4|34.703%|27.7M|430.2MB/s|1.9M|2.5M|1166MB/s|
+|pgzip -8 -p-4|34.602%|27.7M|264.3MB/s|1.6M|2.4M|1146MB/s|
+|pgzip -9 -p-4|34.589%|27.7M|209.2MB/s|1.7M|2.4M|1145MB/s|
+|pgzip -10 -p-4|33.945%|59.6M|64.2MB/s|1.5M|1.9M|1147MB/s|
+|pgzip -11 -p-4|33.884%|59.6M|35.1MB/s|1.6M|2.4M|1162MB/s|
+|pgzip -12 -p-4|33.866%|59.6M|25.0MB/s|1.5M|2.4M|1162MB/s|
+||
+|pgzip -1 -p-16|37.558%|101.4M|3854.0MB/s|1.3M|1.3M|1125MB/s|
+|pgzip -2 -p-16|36.237%|108.5M|3176.4MB/s|1.5M|1.9M|1102MB/s|
+|pgzip -3 -p-16|35.875%|108.5M|2921.3MB/s|1.6M|2.4M|1126MB/s|
+|pgzip -4 -p-16|35.651%|108.5M|2732.7MB/s|1.4M|1.9M|1125MB/s|
+|pgzip -5 -p-16|35.055%|108.5M|2468.7MB/s|1.4M|1.8M|1118MB/s|
+|pgzip -6 -p-16|34.820%|108.5M|2024.7MB/s|1.7M|2.4M|1133MB/s|
+|pgzip -7 -p-16|34.703%|108.5M|1496.1MB/s|1.7M|2.5M|1154MB/s|
+|pgzip -8 -p-16|34.602%|108.5M|904.2MB/s|1.6M|2.4M|1145MB/s|
+|pgzip -9 -p-16|34.589%|108.5M|692.7MB/s|1.7M|2.4M|1138MB/s|
+|pgzip -10 -p-16|33.946%|236.1M|233.5MB/s|1.6M|2.5M|1150MB/s|
+|pgzip -11 -p-16|33.884%|236.1M|128.0MB/s|1.6M|2.4M|1155MB/s|
+|pgzip -12 -p-16|33.865%|236.1M|89.9MB/s|1.5M|2.4M|1135MB/s|
+   
+   
+----------
+----------
+----------
 # Overview
 
 libdeflate is a library for fast, whole-buffer DEFLATE-based compression and

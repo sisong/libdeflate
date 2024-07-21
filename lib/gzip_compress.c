@@ -78,11 +78,11 @@ size_t libdeflate_gzip_compress(struct libdeflate_compressor *c,
 	size_t deflate_size;
 
 	_do_compress_step(libdeflate_gzip_compress_head(libdeflate_get_compression_level(c),
-									in_nbytes,out,out_nbytes_avail));
+									in_nbytes,out_next,out_nbytes_avail));
 	_do_compress_step(libdeflate_deflate_compress(c, in, in_nbytes, out_next,
 									out_nbytes_avail));
 	_do_compress_step(libdeflate_gzip_compress_foot(libdeflate_crc32(0, in, in_nbytes),
-									in_nbytes,out,out_nbytes_avail));
+									in_nbytes,out_next,out_nbytes_avail));
 	return out_next - (u8 *)out;
 }
 
