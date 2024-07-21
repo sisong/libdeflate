@@ -1,5 +1,5 @@
 /*
- * gzip_decompress_by_stream.h
+ * gzip_decompress_by_stream_mt.h
  * added decompress by stream, 2023 housisong
  */
 #ifndef PROGRAMS_PROG_GZIP_DECOMPRESS_STREAM_H
@@ -23,6 +23,10 @@ enum libdeflate_destream_result{
 int gzip_decompress_by_stream(struct libdeflate_decompressor *decompressor,
 							  struct file_stream *in, u64 in_size, struct file_stream *out,
 							  u64* actual_in_nbytes_ret,u64* actual_out_nbytes_ret);
+
+int gzip_decompress_by_stream_mt(struct libdeflate_decompressor *decompressor,
+							     struct file_stream *in, u64 in_size, struct file_stream *out,
+							     size_t thread_num,u64* actual_in_nbytes_ret,u64* actual_out_nbytes_ret);
 
 #ifdef __cplusplus
 }

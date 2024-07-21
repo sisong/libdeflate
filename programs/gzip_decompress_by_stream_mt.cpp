@@ -1,12 +1,15 @@
 /*
- * gzip_decompress_by_stream.c
+ * gzip_decompress_by_stream.cpp
  * added decompress by stream, 2023 housisong
  */
-#include "../lib/gzip_overhead.h"
-#include "../lib/gzip_constants.h"
-#include "gzip_decompress_by_stream.h"
+#include <thread>
+#include <mutex>
+#include <atomic>
 #include <assert.h>
 #include <string.h> //memcpy
+#include "../lib/gzip_overhead.h"
+#include "../lib/gzip_constants.h"
+#include "gzip_decompress_by_stream_mt.h"
 
 #define             kDictSize    (1<<15)  //MATCHFINDER_WINDOW_SIZE
 static const size_t kMaxDeflateBlockSize   = 301000; //default starting value, if input DeflateBlockSize greater than this, then will auto increase;  
@@ -17,6 +20,9 @@ static const size_t kMaxDeflateBlockSize_max = ((~(size_t)0)-kDictSize)/2;
 static inline size_t _dictSize_avail(u64 uncompressed_pos) { 
                         return (uncompressed_pos<kDictSize)?(size_t)uncompressed_pos:kDictSize; }
 
+typedef ssize_t (*xread_t)(struct file_stream *strm, void *buf, size_t count);
+typedef int (*full_write_t)(struct file_stream *strm, const void *buf, size_t count);
+
 #define _read_code_from_file() do{  \
     size_t read_len=code_cur;       \
     memmove(code_buf,code_buf+code_cur,code_buf_size-code_cur); \
@@ -25,7 +31,7 @@ static inline size_t _dictSize_avail(u64 uncompressed_pos) {
         code_buf_size-=read_len-(size_t)(in_size-in_cur);       \
         read_len=in_size-in_cur;    \
     }           \
-    _check(read_len==xread(in,code_buf+code_buf_size-read_len,read_len),    \
+    _check(read_len==xread_proc(in,code_buf+code_buf_size-read_len,read_len),    \
            LIBDEFLATE_DESTREAM_READ_FILE_ERROR);    \
     in_cur+=read_len;               \
 } while(0)
@@ -36,9 +42,10 @@ static inline size_t _limitMaxDefBSize(size_t maxDeflateBlockSize){
     return maxDeflateBlockSize;
 }
 
-int gzip_decompress_by_stream(struct libdeflate_decompressor *d,
-							  struct file_stream *in, u64 in_size,struct file_stream *out,
-							  u64* _actual_in_nbytes_ret,u64* _actual_out_nbytes_ret){
+static int _gzip_decompress_by_stream(struct libdeflate_decompressor *d,
+				struct file_stream *in, u64 in_size,struct file_stream *out,
+				u64* _actual_in_nbytes_ret,u64* _actual_out_nbytes_ret,
+                xread_t xread_proc,full_write_t full_write_proc){
     int err_code=0;
     u8* data_buf=0;
     u8* code_buf=0;
@@ -53,6 +60,7 @@ int gzip_decompress_by_stream(struct libdeflate_decompressor *d,
     size_t code_cur=code_buf_size; //empty
     size_t actual_in_nbytes_ret;
     uint32_t data_crc=0;
+    int is_final_block_ret=0;
     int ret;
 
     data_buf=(u8*)malloc(data_buf_size);
@@ -67,7 +75,6 @@ int gzip_decompress_by_stream(struct libdeflate_decompressor *d,
         code_cur+=actual_in_nbytes_ret;
     }
 
-    int is_final_block_ret=0;
     while(1){
         //     [ ( dict ) |     dataBuf                 ]              [            codeBuf              ]
         //     ^              ^         ^               ^              ^                     ^           ^
@@ -77,7 +84,7 @@ int gzip_decompress_by_stream(struct libdeflate_decompressor *d,
     __datas_prepare:
         if (is_final_block_ret||(data_cur>kLimitDataSize)){//save data to out file
             if (out)
-                _check(0==full_write(out,data_buf+kDictSize,data_cur-kDictSize), LIBDEFLATE_DESTREAM_WRITE_FILE_ERROR);
+                _check(0==full_write_proc(out,data_buf+kDictSize,data_cur-kDictSize), LIBDEFLATE_DESTREAM_WRITE_FILE_ERROR);
             data_crc=libdeflate_crc32(data_crc,data_buf+kDictSize,data_cur-kDictSize);
             out_cur+=data_cur-kDictSize;
             if (is_final_block_ret)
@@ -171,3 +178,35 @@ _out:
     return err_code;
 }
 
+
+int gzip_decompress_by_stream(struct libdeflate_decompressor *d,
+							  struct file_stream *in, u64 in_size, struct file_stream *out,
+							  u64* actual_in_nbytes_ret,u64* actual_out_nbytes_ret){
+	return _gzip_decompress_by_stream(d,in,in_size,out,
+									  actual_in_nbytes_ret,actual_out_nbytes_ret,
+                                      xread,full_write);
+}
+
+
+//multi-thread
+
+int gzip_decompress_by_stream_mt(struct libdeflate_decompressor *d,
+							     struct file_stream *in, u64 in_size,struct file_stream *out,
+							     size_t thread_num,u64* actual_in_nbytes_ret,u64* actual_out_nbytes_ret){
+    xread_t         xread_proc=xread;
+    full_write_t    full_write_proc=full_write;
+
+    if (thread_num>=2){
+        //
+        //todo: out=new_out;
+        //full_write_proc=?
+    }
+    if (thread_num>=3){
+        //
+        //todo: in=new_in;
+        //xread_proc=?
+    }
+    return _gzip_decompress_by_stream(d,in,in_size,out,
+									  actual_in_nbytes_ret,actual_out_nbytes_ret,
+                                      xread_proc,full_write_proc);
+}

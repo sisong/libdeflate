@@ -28,7 +28,7 @@
 
 #include "prog_util.h"
 #include "gzip_compress_by_stream_mt.h"
-#include "gzip_decompress_by_stream.h"
+#include "gzip_decompress_by_stream_mt.h"
 
 #include <errno.h>
 #include <sys/stat.h>
