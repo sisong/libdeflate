@@ -1,11 +1,17 @@
-# [stream_mt] added stream & multi-thread support for libdeflate
-Base on libdeflate, added support compress & decompress by stream, and added base API for support parallel compress.
+# [stream-mt] added stream & multi-thread support for [libdeflate]
+[stream-mt] base on [libdeflate], added support compress & decompress by stream, and added base API for support parallel compress.
 And at the same time, try to keep it simple and fast.
 See programs/pgzip.c, a demo of multi-thread compress and streaming compress & decompress, support large file, run fast & always uses limited memory.
 
-[stream_mt]:https://github.com/sisong/libdeflate/tree/stream-mt
+[stream-mt]:https://github.com/sisong/libdeflate/tree/stream-mt
+[libdeflate]:https://github.com/ebiggers/libdeflate
+[zlib]:https://github.com/madler/zlib
 
-## benchmark
+## benchmark: [zlib] vs [libdeflate] vs [stream-mt]
+### test program version
+ [zlib] v1.3.1   
+ gzip in [libdeflate] v1.20   
+ pgzip in [stream-mt] based on [libdeflate] v1.20   
 ### some files for compress&decompress testing:   
 | |file name|file original size|
 |----:|:----|----:|
@@ -14,16 +20,12 @@ See programs/pgzip.c, a demo of multi-thread compress and streaming compress & d
 |3|gcc_12.2.0.src.tar|865884160|
 |4|jdk_x64_mac_openj9_16.0.1_9_openj9-0.26.0.tar|363765760|
 |5|linux_5.19.9.src.tar|1269637120|
-### test program version
- zlib v1.3.1   
- gzip in libdeflate v1.20   
- pgzip in [stream_mt](https://github.com/sisong/libdeflate/tree/stream-mt) based on libdeflate v1.20   
 ### test infos
  PC: Windows11, CPU R9-7945HX, SSD PCIe4.0x4 4T, DDR5 5200MHz 32Gx2   
  Only test deflate compress & decompress, no crc; build by vc2022;   
  The time counted includes the time of read & write file data;   
  `-9` means compressor run with compress level of 9;   
- `-p-16` means compressor run with 16 threads;   
+ `-p-16` means pgzip compressor run with 16 threads; decompressor support up 3 threads; 
 ### test result average
 |Program|C ratio|C ave. mem|C ave. speed|D ave. mem|D max mem|D ave. speed|
 |:----|----:|----:|----:|----:|----:|----:|
@@ -64,31 +66,31 @@ See programs/pgzip.c, a demo of multi-thread compress and streaming compress & d
 |pgzip -11 -p-1|33.883%|13.3M|9.2MB/s|1.6M|2.4M|1164MB/s|
 |pgzip -12 -p-1|33.865%|13.3M|6.5MB/s|1.5M|2.4M|1156MB/s|
 ||
-|pgzip -1 -p-4|37.558%|25.9M|1309.6MB/s|1.3M|1.3M|1099MB/s|
-|pgzip -2 -p-4|36.237%|27.7M|979.5MB/s|1.6M|2.4M|1074MB/s|
-|pgzip -3 -p-4|35.875%|27.7M|902.5MB/s|1.6M|2.4M|1095MB/s|
-|pgzip -4 -p-4|35.651%|27.7M|839.7MB/s|1.4M|1.8M|1097MB/s|
-|pgzip -5 -p-4|35.055%|27.7M|733.1MB/s|1.4M|1.8M|1131MB/s|
-|pgzip -6 -p-4|34.820%|27.7M|598.4MB/s|1.6M|2.5M|1146MB/s|
-|pgzip -7 -p-4|34.703%|27.7M|430.2MB/s|1.9M|2.5M|1166MB/s|
-|pgzip -8 -p-4|34.602%|27.7M|264.3MB/s|1.6M|2.4M|1146MB/s|
-|pgzip -9 -p-4|34.589%|27.7M|209.2MB/s|1.7M|2.4M|1145MB/s|
-|pgzip -10 -p-4|33.945%|59.6M|64.2MB/s|1.5M|1.9M|1147MB/s|
-|pgzip -11 -p-4|33.884%|59.6M|35.1MB/s|1.6M|2.4M|1162MB/s|
-|pgzip -12 -p-4|33.866%|59.6M|25.0MB/s|1.5M|2.4M|1162MB/s|
+|pgzip -1 -p-4|37.558%|25.9M|1309.6MB/s|2.4M|2.4M|1428MB/s|
+|pgzip -2 -p-4|36.237%|27.7M|979.5MB/s|2.6M|3.0M|1401MB/s|
+|pgzip -3 -p-4|35.875%|27.7M|902.5MB/s|2.6M|3.0M|1439MB/s|
+|pgzip -4 -p-4|35.651%|27.7M|839.7MB/s|2.5M|3.0M|1438MB/s|
+|pgzip -5 -p-4|35.055%|27.7M|733.1MB/s|2.5M|3.0M|1418MB/s|
+|pgzip -6 -p-4|34.820%|27.7M|598.4MB/s|2.6M|3.0M|1449MB/s|
+|pgzip -7 -p-4|34.703%|27.7M|430.2MB/s|2.7M|3.0M|1452MB/s|
+|pgzip -8 -p-4|34.602%|27.7M|264.3MB/s|2.6M|3.0M|1438MB/s|
+|pgzip -9 -p-4|34.589%|27.7M|209.2MB/s|2.7M|3.0M|1438MB/s|
+|pgzip -10 -p-4|33.945%|59.6M|64.2MB/s|2.6M|3.0M|1438MB/s|
+|pgzip -11 -p-4|33.884%|59.6M|35.1MB/s|2.6M|3.0M|1438MB/s|
+|pgzip -12 -p-4|33.866%|59.6M|25.0MB/s|2.5M|3.0M|1449MB/s|
 ||
-|pgzip -1 -p-16|37.558%|101.4M|3854.0MB/s|1.3M|1.3M|1125MB/s|
-|pgzip -2 -p-16|36.237%|108.5M|3176.4MB/s|1.5M|1.9M|1102MB/s|
-|pgzip -3 -p-16|35.875%|108.5M|2921.3MB/s|1.6M|2.4M|1126MB/s|
-|pgzip -4 -p-16|35.651%|108.5M|2732.7MB/s|1.4M|1.9M|1125MB/s|
-|pgzip -5 -p-16|35.055%|108.5M|2468.7MB/s|1.4M|1.8M|1118MB/s|
-|pgzip -6 -p-16|34.820%|108.5M|2024.7MB/s|1.7M|2.4M|1133MB/s|
-|pgzip -7 -p-16|34.703%|108.5M|1496.1MB/s|1.7M|2.5M|1154MB/s|
-|pgzip -8 -p-16|34.602%|108.5M|904.2MB/s|1.6M|2.4M|1145MB/s|
-|pgzip -9 -p-16|34.589%|108.5M|692.7MB/s|1.7M|2.4M|1138MB/s|
-|pgzip -10 -p-16|33.946%|236.1M|233.5MB/s|1.6M|2.5M|1150MB/s|
-|pgzip -11 -p-16|33.884%|236.1M|128.0MB/s|1.6M|2.4M|1155MB/s|
-|pgzip -12 -p-16|33.865%|236.1M|89.9MB/s|1.5M|2.4M|1135MB/s|
+|pgzip -1 -p-16|37.558%|101.4M|3854.0MB/s|2.4M|2.4M|1459MB/s|
+|pgzip -2 -p-16|36.237%|108.5M|3176.4MB/s|2.6M|3.0M|1404MB/s|
+|pgzip -3 -p-16|35.875%|108.5M|2921.3MB/s|2.6M|3.0M|1434MB/s|
+|pgzip -4 -p-16|35.651%|108.5M|2732.7MB/s|2.5M|3.0M|1438MB/s|
+|pgzip -5 -p-16|35.055%|108.5M|2468.7MB/s|2.5M|3.0M|1406MB/s|
+|pgzip -6 -p-16|34.820%|108.5M|2024.7MB/s|2.6M|3.0M|1438MB/s|
+|pgzip -7 -p-16|34.703%|108.5M|1496.1MB/s|2.7M|3.0M|1446MB/s|
+|pgzip -8 -p-16|34.602%|108.5M|904.2MB/s|2.6M|3.0M|1425MB/s|
+|pgzip -9 -p-16|34.589%|108.5M|692.7MB/s|2.7M|3.0M|1416MB/s|
+|pgzip -10 -p-16|33.946%|236.1M|233.5MB/s|2.6M|3.0M|1427MB/s|
+|pgzip -11 -p-16|33.884%|236.1M|128.0MB/s|2.6M|3.0M|1448MB/s|
+|pgzip -12 -p-16|33.865%|236.1M|89.9MB/s|2.5M|3.0M|1429MB/s|
    
    
 ----------
