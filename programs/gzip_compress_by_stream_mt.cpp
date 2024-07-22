@@ -1,6 +1,6 @@
 /*
  * gzip_compress_by_stream_mt.cpp
- * added compress by stream & multi-thread parallel, 2023 housisong
+ * added compress by stream & multi-thread parallel, 2023--2024 housisong
  */
 #include <vector>
 #include <thread>

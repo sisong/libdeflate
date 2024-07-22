@@ -1,6 +1,6 @@
 /*
  * gzip_decompress_by_stream_mt.h
- * added decompress by stream, 2023 housisong
+ * added decompress by stream & multi-thread, 2023--2024 housisong
  */
 #ifndef PROGRAMS_PROG_GZIP_DECOMPRESS_STREAM_H
 #define PROGRAMS_PROG_GZIP_DECOMPRESS_STREAM_H
@@ -15,6 +15,13 @@ enum libdeflate_destream_result{
 	LIBDEFLATE_DESTREAM_WRITE_FILE_ERROR,
 	LIBDEFLATE_DESTREAM_DATA_CRC_ERROR,
 	LIBDEFLATE_DESTREAM_DATA_SIZE_ERROR,
+	
+	LIBDEFLATE_DESTREAM_MT_READ_FILE_ERROR, //25
+	LIBDEFLATE_DESTREAM_MT_WRITE_FILE_ERROR,
+	LIBDEFLATE_DESTREAM_MT_OUT_LACK_ERROR,
+	LIBDEFLATE_DESTREAM_MT_EXCEPTION_ERROR, 
+	LIBDEFLATE_DESTREAM_MT_READ_THREAD_EXCEPTION_ERROR,
+	LIBDEFLATE_DESTREAM_MT_WRITE_THREAD_EXCEPTION_ERROR,//30
 };
 
 //decompress gzip by stream
@@ -26,7 +33,7 @@ int gzip_decompress_by_stream(struct libdeflate_decompressor *decompressor,
 
 int gzip_decompress_by_stream_mt(struct libdeflate_decompressor *decompressor,
 							     struct file_stream *in, u64 in_size, struct file_stream *out,
-							     size_t thread_num,u64* actual_in_nbytes_ret,u64* actual_out_nbytes_ret);
+							     int thread_num,u64* actual_in_nbytes_ret,u64* actual_out_nbytes_ret);
 
 #ifdef __cplusplus
 }

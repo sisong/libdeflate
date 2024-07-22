@@ -1,6 +1,6 @@
 /*
  * gzip_compress_by_stream_mt.h
- * added compress by stream & multi-thread parallel, 2023 housisong
+ * added compress by stream & multi-thread parallel, 2023--2024 housisong
  */
 #ifndef PROGRAMS_PROG_GZIP_COMPRESS_STREAM_H
 #define PROGRAMS_PROG_GZIP_COMPRESS_STREAM_H

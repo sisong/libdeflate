@@ -299,9 +299,10 @@ decompress_file(struct libdeflate_decompressor *decompressor, const tchar *path,
 	if (ret != 0)
 		goto out_close_in;
 
-    ret = gzip_decompress_by_stream(decompressor, &in, stbuf.st_size,(options->test?0:&out), NULL, NULL);
+    ret = gzip_decompress_by_stream_mt(decompressor, &in, stbuf.st_size, (options->test?0:&out),
+									   options->thread_num, NULL, NULL);
 	if (ret != 0){
-		msg("\nERROR: gzip_decompress_by_stream() error code %d\n\n",ret);
+		msg("\nERROR: gzip_decompress_by_stream_mt() error code %d\n\n",ret);
 		goto out_close_out;
 	}
 

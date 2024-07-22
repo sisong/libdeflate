@@ -1,7 +1,8 @@
 /*
- * gzip_decompress_by_stream.cpp
- * added decompress by stream, 2023 housisong
+ * gzip_decompress_by_stream_mt.cpp
+ * added decompress by stream & multi-thread, 2023--2024 housisong
  */
+#include <vector>
 #include <thread>
 #include <mutex>
 #include <atomic>
@@ -44,8 +45,8 @@ static inline size_t _limitMaxDefBSize(size_t maxDeflateBlockSize){
 
 static int _gzip_decompress_by_stream(struct libdeflate_decompressor *d,
 				struct file_stream *in, u64 in_size,struct file_stream *out,
-				u64* _actual_in_nbytes_ret,u64* _actual_out_nbytes_ret,
-                xread_t xread_proc,full_write_t full_write_proc){
+                xread_t xread_proc,full_write_t full_write_proc,
+				u64* _actual_in_nbytes_ret,u64* _actual_out_nbytes_ret){
     int err_code=0;
     u8* data_buf=0;
     u8* code_buf=0;
@@ -182,31 +183,264 @@ _out:
 int gzip_decompress_by_stream(struct libdeflate_decompressor *d,
 							  struct file_stream *in, u64 in_size, struct file_stream *out,
 							  u64* actual_in_nbytes_ret,u64* actual_out_nbytes_ret){
-	return _gzip_decompress_by_stream(d,in,in_size,out,
-									  actual_in_nbytes_ret,actual_out_nbytes_ret,
-                                      xread,full_write);
+	return _gzip_decompress_by_stream(d,in,in_size,out,xread,full_write,
+									  actual_in_nbytes_ret,actual_out_nbytes_ret);
 }
 
 
-//multi-thread
+//------------------------------------------------------------------------------------------------
+// multi-thread
+static const size_t kBestWBufCount=3;
+static const size_t kWBufSize=1024*256;
+
+struct work_buf_t{
+    work_buf_t* next;
+    size_t      cur;
+    u8          buf[kWBufSize];
+};
+
+static work_buf_t* malloc_list(size_t listCount){
+    work_buf_t* list=(work_buf_t*)malloc(sizeof(work_buf_t)*listCount);
+    for (size_t i=0;i<listCount;++i){
+        list[i].next=(i+1<listCount)?&list[i+1]:0;
+    }
+    return list;
+}
+
+struct stream_mt_t{
+    file_stream*    base;
+    int             err_code;
+    u64             data_len;
+    work_buf_t*     cur_work_buf;
+    inline  stream_mt_t():base(0),err_code(0),data_len(0),
+                          cur_work_buf(0),free_list(0),work_list(0),
+                          _pmem(0),_is_work_exit(0),_is_work_finished(0){}
+    inline ~stream_mt_t(){ if (_pmem) free(_pmem); }
+    inline bool init(file_stream* _base,u64 _data_len){
+        assert((base==0)&&(_base!=0));
+        base=_base;
+        data_len=_data_len;
+        _pmem=free_list=malloc_list(kBestWBufCount);
+        return (_pmem!=0);
+    }
+    inline void work_end(){
+        _is_work_exit.store(1);
+    }inline void work_finished(){
+        _is_work_finished.store(1);
+    }
+    void push_free_buf(work_buf_t* node_buf){
+        std::lock_guard<std::mutex> _auto_locker(_lock);
+        node_buf->next=free_list;
+        free_list=node_buf;
+    }
+    inline work_buf_t* pop_free_buf(){//wait a free node
+        return _pop_buf(&free_list);
+    }
+    void push_work_buf(work_buf_t* node_buf){
+        node_buf->next=0;
+        std::lock_guard<std::mutex> _auto_locker(_lock);
+        work_buf_t** plist=&work_list;
+        while (*plist) plist=&((*plist)->next);//to last node
+        *plist=node_buf;
+    }
+    inline work_buf_t* pop_work_buf(){//wait a work node
+        return _pop_buf(&work_list);
+    }
+protected:
+    work_buf_t*     free_list;
+    work_buf_t*     work_list;
+    void*           _pmem;
+    std::mutex      _lock;
+    std::atomic<int> _is_work_exit;
+    std::atomic<int> _is_work_finished;
+    
+    work_buf_t* _pop_buf(work_buf_t** plist){//wait a free node
+        while (!_is_work_exit.load()){ 
+            {
+                std::lock_guard<std::mutex> _auto_locker(_lock);
+                work_buf_t* result=*plist;
+                if (result){
+                    *plist=(*plist)->next;
+                    return result;
+                }else if (_is_work_finished.load())
+                    break;
+            }
+            std::this_thread::yield(); //todo: wait by signal, not use thread yield
+        }
+        return 0; //exit work loop
+    }
+};
+
+struct in_stream_mt:public stream_mt_t{
+};
+
+static ssize_t xread_mt(struct file_stream *strm, void *buf, size_t count){
+    in_stream_mt* self=(in_stream_mt*)strm;
+    u8* dst=(u8*)buf;
+    const size_t count_bck=count;
+    size_t result=0;
+    work_buf_t* cur_buf=self->cur_work_buf;
+    while (count){
+        if (cur_buf==0){
+            cur_buf=self->pop_work_buf();
+            if (cur_buf==0)
+                break;//fail or exit
+        }
+        
+        const size_t _blen=kWBufSize-cur_buf->cur;
+        const size_t clen=(count<_blen)?count:_blen;
+        memcpy(dst,cur_buf->buf+cur_buf->cur,clen);
+        cur_buf->cur+=clen;
+        if (cur_buf->cur==kWBufSize){
+            self->push_free_buf(cur_buf);
+            cur_buf=0;
+        }
+        result+=clen;
+        dst+=clen;
+        count-=clen;
+    }
+    self->cur_work_buf=cur_buf;
+    return (result==count_bck)?result:-1;
+}
+
+static void _read_in_thread(in_stream_mt* self){
+    u64         data_len=self->data_len;
+    work_buf_t* wbuf=0;
+    try{
+        while ((data_len>0)&&(wbuf=self->pop_free_buf())){
+            const size_t clen=(kWBufSize<data_len)?kWBufSize:(size_t)data_len;
+            wbuf->cur=kWBufSize-clen;
+            if (xread(self->base,wbuf->buf+wbuf->cur,clen)==clen){
+                self->push_work_buf(wbuf);
+                data_len-=clen;
+            }else{
+                self->err_code=LIBDEFLATE_DESTREAM_MT_READ_FILE_ERROR;
+                break;
+            }
+        }
+    }catch(...){
+        self->err_code=LIBDEFLATE_DESTREAM_MT_READ_THREAD_EXCEPTION_ERROR;
+    }
+    self->data_len=data_len;
+    if (self->err_code!=0)
+        self->work_end();
+    else
+        self->work_finished();
+}
+
+struct out_stream_mt:public stream_mt_t{
+    void wait_flush_write(){
+        if ((cur_work_buf)&&(cur_work_buf->cur>0)){
+            push_work_buf(cur_work_buf);
+            cur_work_buf=0;
+        }
+        work_finished();
+        while (!_is_work_exit.load()){
+            std::this_thread::yield(); //todo: wait by signal, not use thread yield
+        }
+    }
+};
+static int full_write_mt(struct file_stream *strm, const void *buf, size_t count){
+    out_stream_mt* self=(out_stream_mt*)strm;
+    const u8* src=(const u8*)buf;
+    const size_t count_bck=count;
+    size_t result=0;
+    work_buf_t* cur_buf=self->cur_work_buf;
+    while (count){
+        if (cur_buf==0){
+            cur_buf=self->pop_free_buf();
+            if (cur_buf==0)
+                break;//fail or exit
+            cur_buf->cur=0; //to empty
+        }
+        
+        const size_t _blen=kWBufSize-cur_buf->cur;
+        const size_t clen=(count<_blen)?count:_blen;
+        memcpy(cur_buf->buf+cur_buf->cur,src,clen);
+        cur_buf->cur+=clen;
+        if (cur_buf->cur==kWBufSize){
+            self->push_work_buf(cur_buf);
+            cur_buf=0;
+        }
+        result+=clen;
+        src+=clen;
+        count-=clen;
+    }
+    self->cur_work_buf=cur_buf;
+    return (result==count_bck)?0:-1;
+}
+static void _write_out_thread(out_stream_mt* self){
+    u64         data_len=self->data_len;
+    work_buf_t* wbuf=0;
+    try{
+        while (wbuf=self->pop_work_buf()){
+            const size_t clen=wbuf->cur;
+            if (full_write(self->base,wbuf->buf,clen)==0){
+                self->push_free_buf(wbuf);
+                data_len+=clen;
+            }else{
+                self->err_code=LIBDEFLATE_DESTREAM_MT_WRITE_FILE_ERROR;
+                break;
+            }
+        }
+    }catch(...){
+        self->err_code=LIBDEFLATE_DESTREAM_MT_WRITE_THREAD_EXCEPTION_ERROR;
+    }
+    self->data_len=data_len;
+    self->work_end();
+}
 
 int gzip_decompress_by_stream_mt(struct libdeflate_decompressor *d,
 							     struct file_stream *in, u64 in_size,struct file_stream *out,
-							     size_t thread_num,u64* actual_in_nbytes_ret,u64* actual_out_nbytes_ret){
+							     int thread_num,u64* actual_in_nbytes_ret,u64* actual_out_nbytes_ret){
+    if (thread_num<=1){
+	    return _gzip_decompress_by_stream(d,in,in_size,out,xread,full_write,
+									      actual_in_nbytes_ret,actual_out_nbytes_ret);
+    }
     xread_t         xread_proc=xread;
     full_write_t    full_write_proc=full_write;
+    in_stream_mt    in_mt;
+    out_stream_mt   out_mt;
+    size_t          thread_size=0;
 
-    if (thread_num>=2){
-        //
-        //todo: out=new_out;
-        //full_write_proc=?
+    if (out&&(thread_size+1<thread_num)){
+        thread_size++;
+        if (!out_mt.init(out,0)) return LIBDEFLATE_DESTREAM_MEM_ALLOC_ERROR;
+        out=(struct file_stream*)&out_mt;
+        full_write_proc=full_write_mt;
     }
-    if (thread_num>=3){
-        //
-        //todo: in=new_in;
-        //xread_proc=?
+    if (thread_size+1<thread_num){
+        thread_size++;
+        if (!in_mt.init(in,in_size)) return LIBDEFLATE_DESTREAM_MEM_ALLOC_ERROR;
+        in=(struct file_stream*)&in_mt;
+        xread_proc=xread_mt;
     }
-    return _gzip_decompress_by_stream(d,in,in_size,out,
-									  actual_in_nbytes_ret,actual_out_nbytes_ret,
-                                      xread_proc,full_write_proc);
+    try{
+        std::vector<std::thread> threads(thread_size);
+        if (in_mt.base)  threads[--thread_size]=std::thread(_read_in_thread,&in_mt);
+        if (out_mt.base) threads[--thread_size]=std::thread(_write_out_thread,&out_mt);
+        u64 work_write_ret=0;
+        int ret=_gzip_decompress_by_stream(d,in,in_size,out,xread_proc,full_write_proc,
+                                           actual_in_nbytes_ret,&work_write_ret);
+        if (in_mt.base)
+            in_mt.work_end();
+        if (out_mt.base){
+            if (ret==LIBDEFLATE_SUCCESS)
+                out_mt.wait_flush_write();
+            out_mt.work_end();
+        }
+        for (size_t i=0;i<threads.size();i++)
+            threads[i].join();
+        if (out_mt.err_code!=LIBDEFLATE_SUCCESS)
+            ret=out_mt.err_code;
+        if (in_mt.err_code!=LIBDEFLATE_SUCCESS)
+            ret=in_mt.err_code;
+        if ((ret==LIBDEFLATE_SUCCESS)&&(out_mt.base)&&(out_mt.data_len!=work_write_ret))
+            ret=LIBDEFLATE_DESTREAM_MT_OUT_LACK_ERROR;
+        if ((ret==LIBDEFLATE_SUCCESS)&&actual_out_nbytes_ret)
+            *actual_out_nbytes_ret=work_write_ret;
+        return ret;
+    }catch(...){
+        return LIBDEFLATE_DESTREAM_MT_EXCEPTION_ERROR;
+    }
 }
