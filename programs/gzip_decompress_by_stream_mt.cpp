@@ -192,16 +192,19 @@ int gzip_decompress_by_stream(struct libdeflate_decompressor *d,
 // multi-thread
 static const size_t kBestWBufCount=3;
 static const size_t kWBufSize=1024*256;
+static const size_t kRBufSize=1024*64;
 
 struct work_buf_t{
     work_buf_t* next;
     size_t      cur;
-    u8          buf[kWBufSize];
+    u8*         buf;
 };
 
-static work_buf_t* malloc_list(size_t listCount){
-    work_buf_t* list=(work_buf_t*)malloc(sizeof(work_buf_t)*listCount);
-    for (size_t i=0;i<listCount;++i){
+static work_buf_t* malloc_list(size_t listCount,size_t bufSize){
+    work_buf_t* list=(work_buf_t*)malloc((sizeof(work_buf_t)+bufSize)*listCount);
+    u8* buf=(u8*)&list[listCount];
+    for (size_t i=0;i<listCount;++i,buf+=bufSize){
+        list[i].buf=buf;
         list[i].next=(i+1<listCount)?&list[i+1]:0;
     }
     return list;
@@ -216,11 +219,11 @@ struct stream_mt_t{
                           cur_work_buf(0),free_list(0),work_list(0),
                           _pmem(0),_is_work_exit(0),_is_work_finished(0){}
     inline ~stream_mt_t(){ if (_pmem) free(_pmem); }
-    inline bool init(file_stream* _base,u64 _data_len){
+    inline bool init(file_stream* _base,u64 _data_len,size_t bufSize){
         assert((base==0)&&(_base!=0));
         base=_base;
         data_len=_data_len;
-        _pmem=free_list=malloc_list(kBestWBufCount);
+        _pmem=free_list=malloc_list(kBestWBufCount,bufSize);
         return (_pmem!=0);
     }
     inline void work_end(){
@@ -287,11 +290,11 @@ static ssize_t xread_mt(struct file_stream *strm, void *buf, size_t count){
                 break;//fail or exit
         }
         
-        const size_t _blen=kWBufSize-cur_buf->cur;
+        const size_t _blen=kRBufSize-cur_buf->cur;
         const size_t clen=(count<_blen)?count:_blen;
         memcpy(dst,cur_buf->buf+cur_buf->cur,clen);
         cur_buf->cur+=clen;
-        if (cur_buf->cur==kWBufSize){
+        if (cur_buf->cur==kRBufSize){
             self->push_free_buf(cur_buf);
             cur_buf=0;
         }
@@ -308,8 +311,8 @@ static void _read_in_thread(in_stream_mt* self){
     work_buf_t* wbuf=0;
     try{
         while ((data_len>0)&&(wbuf=self->pop_free_buf())){
-            const size_t clen=(kWBufSize<data_len)?kWBufSize:(size_t)data_len;
-            wbuf->cur=kWBufSize-clen;
+            const size_t clen=(kRBufSize<data_len)?kRBufSize:(size_t)data_len;
+            wbuf->cur=kRBufSize-clen;
             if (xread(self->base,wbuf->buf+wbuf->cur,clen)==clen){
                 self->push_work_buf(wbuf);
                 data_len-=clen;
@@ -405,13 +408,13 @@ int gzip_decompress_by_stream_mt(struct libdeflate_decompressor *d,
 
     if (out&&(thread_size+1<thread_num)){
         thread_size++;
-        if (!out_mt.init(out,0)) return LIBDEFLATE_DESTREAM_MEM_ALLOC_ERROR;
+        if (!out_mt.init(out,0,kWBufSize)) return LIBDEFLATE_DESTREAM_MEM_ALLOC_ERROR;
         out=(struct file_stream*)&out_mt;
         full_write_proc=full_write_mt;
     }
     if (thread_size+1<thread_num){
         thread_size++;
-        if (!in_mt.init(in,in_size)) return LIBDEFLATE_DESTREAM_MEM_ALLOC_ERROR;
+        if (!in_mt.init(in,in_size,kRBufSize)) return LIBDEFLATE_DESTREAM_MEM_ALLOC_ERROR;
         in=(struct file_stream*)&in_mt;
         xread_proc=xread_mt;
     }
