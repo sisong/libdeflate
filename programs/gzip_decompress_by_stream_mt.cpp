@@ -18,8 +18,6 @@ static const size_t kMaxDeflateBlockSize_min =1024*4;
 static const size_t kMaxDeflateBlockSize_max = ((~(size_t)0)-kDictSize)/2;
 #define _check(v,_ret_errCode) do { if (!(v)) {err_code=_ret_errCode; goto _out; } } while (0)
 #define _check_d(_d_ret) _check(_d_ret==LIBDEFLATE_SUCCESS, _d_ret)
-static inline size_t _dictSize_avail(u64 uncompressed_pos) { 
-                        return (uncompressed_pos<kDictSize)?(size_t)uncompressed_pos:kDictSize; }
 
 typedef ssize_t (*xread_t)(struct file_stream *strm, void *buf, size_t count);
 typedef int (*full_write_t)(struct file_stream *strm, const void *buf, size_t count);
@@ -90,18 +88,16 @@ static int _gzip_decompress_by_stream(struct libdeflate_decompressor *d,
             out_cur+=data_cur-kDictSize;
             if (is_final_block_ret)
                 break;
-            size_t dict_size=_dictSize_avail(out_cur);
-            memmove(data_buf+kDictSize-dict_size,data_buf+data_cur-dict_size,dict_size);//dict data for next block
+            memmove(data_buf,data_buf+data_cur-kDictSize,kDictSize);//dict data for next block
             data_cur=kDictSize;
         }
-        size_t dict_size=_dictSize_avail(out_cur+(data_cur-kDictSize));
         if (code_cur>kLimitCodeSize)
             _read_code_from_file();
 
         size_t actual_out_nbytes_ret;
         const size_t dec_state=libdeflate_deflate_decompress_get_state(d);
         ret=libdeflate_deflate_decompress_block(d,code_buf+code_cur,code_buf_size-code_cur,
-                data_buf+data_cur-dict_size,dict_size,data_buf_size-data_cur,
+                data_buf+data_cur-kDictSize,kDictSize,data_buf_size-data_cur,
                 &actual_in_nbytes_ret,&actual_out_nbytes_ret,
                 LIBDEFLATE_STOP_BY_ANY_BLOCK,&is_final_block_ret);
         if (ret!=LIBDEFLATE_SUCCESS){
