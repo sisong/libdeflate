@@ -57,7 +57,7 @@
 #  pragma message("UNSAFE DECOMPRESSION IS ENABLED. THIS MUST ONLY BE USED IF THE DECOMPRESSOR INPUT WILL ALWAYS BE TRUSTED!")
 #  define SAFETY_CHECK(expr)	(void)(expr)
 #else
-#  define SAFETY_CHECK(expr)	if (unlikely(!(expr))) return LIBDEFLATE_BAD_DATA
+#  define SAFETY_CHECK(expr)	if (unlikely(!(expr))) goto _on_bad_data;
 #endif
 
 /*****************************************************************************
@@ -1144,13 +1144,13 @@ libdeflate_deflate_decompress_block(struct libdeflate_decompressor *d,
 						   actual_in_nbytes_ret, actual_out_nbytes_ret, stop_type, is_final_block_ret);
 }
 
-LIBDEFLATEAPI size_t libdeflate_deflate_decompress_get_state(struct libdeflate_decompressor *d){
+LIBDEFLATEAPI uint16_t libdeflate_deflate_decompress_get_state(struct libdeflate_decompressor *d){
 	ASSERT(d->bitsleft_back<=7);
-	ASSERT(d->bitbuf_back==(size_t)(d->bitbuf_back<<3>>3));
+	ASSERT(d->bitbuf_back==(uint16_t)(d->bitbuf_back<<3>>3));
 	return (d->bitbuf_back<<3) | d->bitsleft_back;
 }
 
-LIBDEFLATEAPI void libdeflate_deflate_decompress_set_state(struct libdeflate_decompressor *d,size_t state){
+LIBDEFLATEAPI void libdeflate_deflate_decompress_set_state(struct libdeflate_decompressor *d,uint16_t state){
 	d->bitsleft_back=state&7;
 	d->bitbuf_back=state>>3;
 }

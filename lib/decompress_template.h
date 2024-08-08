@@ -111,6 +111,7 @@ FUNCNAME(struct libdeflate_decompressor * restrict d,
 	 size_t *actual_in_nbytes_ret,size_t *actual_out_nbytes_ret,
 	 enum libdeflate_decompress_stop_by stop_type,int* is_final_block_ret)
 {
+	enum libdeflate_result result = LIBDEFLATE_SUCCESS;
 	struct libdeflate_decompressor * _d=d;
 	u8 *out_next = ((u8 *)out)+in_dict_nbytes;
 	u8 * const out_end = out_next + out_nbytes_avail;
@@ -343,7 +344,7 @@ next_block:
 
 		SAFETY_CHECK(len == (u16)~nlen);
 		if (unlikely(len > out_end - out_next))
-			return LIBDEFLATE_INSUFFICIENT_SPACE;
+			goto _on_insufficient_space;
 		SAFETY_CHECK(len <= in_end - in_next);
 
 		memcpy(out_next, in_next, len);
@@ -742,7 +743,7 @@ generic_loop:
 		length = entry >> 16;
 		if (entry & HUFFDEC_LITERAL) {
 			if (unlikely(out_next == out_end))
-				return LIBDEFLATE_INSUFFICIENT_SPACE;
+				goto _on_insufficient_space;
 			*out_next++ = length;
 			continue;
 		}
@@ -750,7 +751,7 @@ generic_loop:
 			goto block_done;
 		length += EXTRACT_VARBITS8(saved_bitbuf, entry) >> (u8)(entry >> 8);
 		if (unlikely(length > out_end - out_next))
-			return LIBDEFLATE_INSUFFICIENT_SPACE;
+			goto _on_insufficient_space;
 
 		if (!CAN_CONSUME(LENGTH_MAXBITS + OFFSET_MAXBITS))
 			REFILL_BITS();
@@ -819,6 +820,7 @@ block_done:
 		d->bitbuf_back=bitbuf&((1<<(bitsleft&7))-1);
 	}
 
+_on_return:
 	/* Optionally return the actual number of bytes consumed. */
 	if (actual_in_nbytes_ret) {
 		*actual_in_nbytes_ret = in_next - (u8 *)in;
@@ -828,10 +830,17 @@ block_done:
 	if (actual_out_nbytes_ret) {
 		*actual_out_nbytes_ret = out_next - (((u8 *)out)+in_dict_nbytes);
 	} else {
-		if (out_next != out_end)
-			return LIBDEFLATE_SHORT_OUTPUT;
+		if ( (out_next != out_end) && (result==LIBDEFLATE_SUCCESS) )
+			result = LIBDEFLATE_SHORT_OUTPUT;
 	}
-	return LIBDEFLATE_SUCCESS;
+	return result;
+
+_on_bad_data:
+	result=LIBDEFLATE_BAD_DATA;
+	goto _on_return;
+_on_insufficient_space:
+	result=LIBDEFLATE_INSUFFICIENT_SPACE;
+	goto _on_return;
 }
 
 #undef FUNCNAME

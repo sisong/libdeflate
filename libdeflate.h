@@ -139,11 +139,15 @@ libdeflate_deflate_compress_block(struct libdeflate_compressor *compressor,
 			    const void *in_block_with_dict,size_t dict_nbytes,size_t in_block_nbytes,int in_is_final_block,
 			    void *out_part, size_t out_part_nbytes_avail,int out_is_flush_to_byte_align);
 
-LIBDEFLATEAPI size_t libdeflate_deflate_compress_get_state(struct libdeflate_compressor *compressor);
-LIBDEFLATEAPI void libdeflate_deflate_compress_set_state(struct libdeflate_compressor *compressor,size_t state);
+LIBDEFLATEAPI uint16_t libdeflate_deflate_compress_get_state(struct libdeflate_compressor *compressor);
+LIBDEFLATEAPI void libdeflate_deflate_compress_set_state(struct libdeflate_compressor *compressor,uint16_t state);
 
+/*
+ * Similar to libdeflate_deflate_compress_block(), but the data is encoded to 
+ * output stream with uncompressed manner.
+ */
 LIBDEFLATEAPI size_t
-libdeflate_deflate_compress_block_uncompressed(struct libdeflate_compressor *c,
+libdeflate_deflate_compress_block_uncompressed(struct libdeflate_compressor *compressor,
 				const void *in_block,size_t in_block_nbytes,int in_is_final_block,
 			    void *out_part, size_t out_part_nbytes_avail);
 
@@ -358,9 +362,13 @@ libdeflate_deflate_decompress_block(struct libdeflate_decompressor *decompressor
 				 size_t *actual_in_nbytes_ret,size_t *actual_out_nbytes_ret,
 				 enum libdeflate_decompress_stop_by stop_type,int* is_final_block_ret);
 
-
-LIBDEFLATEAPI size_t libdeflate_deflate_decompress_get_state(struct libdeflate_decompressor *decompressor);
-LIBDEFLATEAPI void libdeflate_deflate_decompress_set_state(struct libdeflate_decompressor *decompressor,size_t state);
+/*
+ * You can get (save) & set (restore) the decompressor's state;
+ * If the data inputed is not enough or ouput space full, you can restore the state of 
+ * the decompressor and provide more data or space to continue attempt decompress.
+ */
+LIBDEFLATEAPI uint16_t libdeflate_deflate_decompress_get_state(struct libdeflate_decompressor *decompressor);
+LIBDEFLATEAPI void libdeflate_deflate_decompress_set_state(struct libdeflate_decompressor *decompressor,uint16_t state);
 
 /*
  * Clear the state saved between calls libdeflate_deflate_decompress_block();

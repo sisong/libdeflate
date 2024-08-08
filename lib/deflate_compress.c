@@ -3675,8 +3675,8 @@ deflate_near_optimal_clear_old_stats(struct libdeflate_compressor *c)
 			deflate_near_optimal_init_stats(c); }
 
 #define _DEF_near_optimal_next_slide()  { in_next_slide = in_cur_base + MATCHFINDER_WINDOW_SIZE; }
-#define _DEF_near_optimal_slide(isSlideWindow)	{	\
-			if (isSlideWindow) bt_matchfinder_slide_window(&c->p.n.bt_mf);	\
+#define _DEF_near_optimal_slide()	{	\
+			bt_matchfinder_slide_window(&c->p.n.bt_mf);	\
 			in_cur_base = in_next;		\
 			_DEF_near_optimal_next_slide();		}
 
@@ -3730,7 +3730,7 @@ deflate_compress_near_optimal(struct libdeflate_compressor * restrict c,
 		const u8 * const in_max_block_end = in_next + dict_nbytes-dict_nbytes_continue;
 		for (;;) {
 			if (in_next == in_next_slide)
-				_DEF_near_optimal_slide(true);
+				_DEF_near_optimal_slide();
 
 			adjust_max_and_nice_len(&max_len, &nice_len, in_border_end - in_next);
 			bt_matchfinder_skip_byte(
@@ -3790,7 +3790,7 @@ deflate_compress_near_optimal(struct libdeflate_compressor * restrict c,
 
 			/* Slide the window forward if needed. */
 			if (in_next == in_next_slide)
-				_DEF_near_optimal_slide(true);
+				_DEF_near_optimal_slide();
 
 			/*
 			 * Find matches with the current position using the
@@ -3861,7 +3861,7 @@ deflate_compress_near_optimal(struct libdeflate_compressor * restrict c,
 				--best_len;
 				do {
 					if (in_next == in_next_slide)
-						_DEF_near_optimal_slide(true);
+						_DEF_near_optimal_slide();
 					adjust_max_and_nice_len(&max_len,
 								&nice_len,
 								in_border_end - in_next);
@@ -4203,13 +4203,13 @@ static size_t _deflate_flush_to_byte_align(u8* out,size_t out_nbytes_avail,bitbu
 
 
 
-LIBDEFLATEAPI size_t libdeflate_deflate_compress_get_state(struct libdeflate_compressor *c){
+LIBDEFLATEAPI uint16_t libdeflate_deflate_compress_get_state(struct libdeflate_compressor *c){
 	ASSERT(c->bitcount_back_for_block<=7);
-	ASSERT(c->bitbuf_back_for_block==(size_t)(c->bitbuf_back_for_block<<3>>3));
+	ASSERT(c->bitbuf_back_for_block==(uint16_t)(c->bitbuf_back_for_block<<3>>3));
 	return (c->bitbuf_back_for_block<<3) | c->bitcount_back_for_block;
 }
 
-LIBDEFLATEAPI void libdeflate_deflate_compress_set_state(struct libdeflate_compressor *c,size_t state){
+LIBDEFLATEAPI void libdeflate_deflate_compress_set_state(struct libdeflate_compressor *c,uint16_t state){
 	c->bitcount_back_for_block=state&7;
 	c->bitbuf_back_for_block=state>>3;
 }

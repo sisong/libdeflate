@@ -217,12 +217,12 @@ ht_matchfinder_skip_bytes(struct ht_matchfinder * const mf,
 
 	hash = *next_hash;
 	do {
-
-#if HT_MATCHFINDER_BUCKET_SIZE == 1
+#if   HT_MATCHFINDER_BUCKET_SIZE == 1
 #elif HT_MATCHFINDER_BUCKET_SIZE == 2
 		mf->hash_tab[hash][1] = mf->hash_tab[hash][0];
 #else 
 	/* Generic version for HT_MATCHFINDER_BUCKET_SIZE > 2 */
+        int i;
 		for (i = HT_MATCHFINDER_BUCKET_SIZE - 1; i > 0; i--)
 			mf->hash_tab[hash][i] = mf->hash_tab[hash][i - 1];
 #endif

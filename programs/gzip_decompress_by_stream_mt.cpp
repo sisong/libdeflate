@@ -16,6 +16,7 @@
 static const size_t kMaxDeflateBlockSize   = 301000; //default starting value, if input DeflateBlockSize greater than this, then will auto increase;  
 static const size_t kMaxDeflateBlockSize_min =1024*4;
 static const size_t kMaxDeflateBlockSize_max = ((~(size_t)0)-kDictSize)/2;
+static const size_t kInputSufficientSize = (1<<16);
 #define _check(v,_ret_errCode) do { if (!(v)) {err_code=_ret_errCode; goto _out; } } while (0)
 #define _check_d(_d_ret) _check(_d_ret==LIBDEFLATE_SUCCESS, _d_ret)
 
@@ -80,6 +81,8 @@ static int _gzip_decompress_by_stream(struct libdeflate_decompressor *d,
         //  data_buf       out_cur   data_cur     data_buf_size     code_buf              code_cur code_buf_size
         size_t kLimitDataSize=curBlockSize/2+kDictSize;
         size_t kLimitCodeSize=code_buf_size/2;
+        size_t actual_out_nbytes_ret;
+        uint16_t dec_state;
     __datas_prepare:
         if (is_final_block_ret||(data_cur>kLimitDataSize)){//save data to out file
             if (out)
@@ -93,15 +96,14 @@ static int _gzip_decompress_by_stream(struct libdeflate_decompressor *d,
         }
         if (code_cur>kLimitCodeSize)
             _read_code_from_file();
-
-        size_t actual_out_nbytes_ret;
-        const size_t dec_state=libdeflate_deflate_decompress_get_state(d);
+        dec_state=libdeflate_deflate_decompress_get_state(d);
         ret=libdeflate_deflate_decompress_block(d,code_buf+code_cur,code_buf_size-code_cur,
                 data_buf+data_cur-kDictSize,kDictSize,data_buf_size-data_cur,
                 &actual_in_nbytes_ret,&actual_out_nbytes_ret,
                 LIBDEFLATE_STOP_BY_ANY_BLOCK,&is_final_block_ret);
         if (ret!=LIBDEFLATE_SUCCESS){
-            if ((in_cur==in_size)&&(ret!=LIBDEFLATE_INSUFFICIENT_SPACE))
+            if (((in_cur==in_size)||((size_t)((code_buf_size-code_cur)-actual_in_nbytes_ret)>kInputSufficientSize))
+                    &&(ret!=LIBDEFLATE_INSUFFICIENT_SPACE))
                 _check_d(ret);
             kLimitDataSize=kDictSize;
             kLimitCodeSize=0;
@@ -169,6 +171,7 @@ static int _gzip_decompress_by_stream(struct libdeflate_decompressor *d,
         *_actual_out_nbytes_ret=out_cur;
 
 _out:
+    libdeflate_deflate_decompress_block_reset(d);
     if (data_buf) free(data_buf);
     if (code_buf) free(code_buf);
     if (_dict_buf_back) free(_dict_buf_back);
