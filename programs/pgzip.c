@@ -66,7 +66,7 @@ show_usage(FILE *fp)
 "  -12       slowest (best) compression\n"
 "  -c        write to standard output\n"
 "  -d        decompress\n"
-"  -p NUM    default NUM is 4, open multi-thread Parallel mode when compress;\n"
+"  -p NUM    default thread NUM is 4, open multi-thread parallel mode;\n"
 "  -f        overwrite existing output files; (de)compress hard-linked files;\n"
 "            allow reading/writing compressed data from/to terminal;\n"
 "            with gunzip -c, pass through non-gzipped data\n"
@@ -85,7 +85,7 @@ show_version(void)
 	printf(
 "pgzip compression program v" LIBDEFLATE_VERSION_STRING "\n"
 "Copyright 2016 Eric Biggers\n"
-"added compression by stream & multi-thread parallel, 2023 housisong\n"
+"added compress & decompress by stream & multi-thread, 2023--2024 housisong\n"
 "\n"
 "This program is free software which may be modified and/or redistributed\n"
 "under the terms of the MIT license.  There is NO WARRANTY, to the extent\n"
@@ -138,7 +138,7 @@ append_suffix(const tchar *path, const tchar *suffix)
 	size_t suffix_len = tstrlen(suffix);
 	tchar *suffixed_path;
 
-	suffixed_path = xmalloc((path_len + suffix_len + 1) * sizeof(tchar));
+	suffixed_path = (tchar *)xmalloc((path_len + suffix_len + 1) * sizeof(tchar));
 	if (suffixed_path == NULL)
 		return NULL;
 	tmemcpy(suffixed_path, path, path_len);
@@ -262,7 +262,7 @@ decompress_file(struct libdeflate_decompressor *decompressor, const tchar *path,
 			 * stdout.  Strip the suffix to get the path to the
 			 * output file.
 			 */
-			newpath = xmalloc((suffix - oldpath + 1) *
+			newpath = (tchar *)xmalloc((suffix - oldpath + 1) *
 					  sizeof(tchar));
 			if (newpath == NULL)
 				return -1;

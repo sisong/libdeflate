@@ -26,11 +26,16 @@ enum libdeflate_enstream_result{
     LIBDEFLATE_ENSTREAM_MT_THREAD_EXCEPTION_ERROR,
 };
 
-//compress gzip by stream & multi-thread
+//compress gzip by stream
 //  actual_out_nbytes_ret can NULL;
 //	return value is libdeflate_enstream_result.
+int gzip_compress_by_stream(int compression_level,struct file_stream *in,u64 in_size,
+                            struct file_stream *out,u64* actual_out_nbytes_ret);
+
+//compress gzip by stream & multi-thread
 int gzip_compress_by_stream_mt(int compression_level,struct file_stream *in,u64 in_size,
                                struct file_stream *out,int thread_num,u64* actual_out_nbytes_ret);
+
 
 #ifdef __cplusplus
 }
