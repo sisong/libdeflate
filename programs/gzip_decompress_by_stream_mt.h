@@ -24,17 +24,28 @@ enum libdeflate_destream_result{
 	LIBDEFLATE_DESTREAM_MT_WRITE_THREAD_EXCEPTION_ERROR,//30
 };
 
-//decompress gzip by stream
+//decompress one gzip by stream
 //  'out','actual_in_nbytes_ret','actual_out_nbytes_ret' can NULL;
 //	return value is libdeflate_result or libdeflate_destream_result.
 int gzip_decompress_by_stream(struct libdeflate_decompressor *decompressor,
 							  struct file_stream *in, u64 in_size, struct file_stream *out,
 							  u64* actual_in_nbytes_ret,u64* actual_out_nbytes_ret);
 
-//decompress gzip by stream & multi-thread
+//decompress one gzip by stream & multi-thread
 int gzip_decompress_by_stream_mt(struct libdeflate_decompressor *decompressor,
 							     struct file_stream *in, u64 in_size, struct file_stream *out,
 							     int thread_num,u64* actual_in_nbytes_ret,u64* actual_out_nbytes_ret);
+
+
+//decompress multi concatenated gzip by stream
+int gzips_decompress_by_stream(struct libdeflate_decompressor *decompressor,
+							   struct file_stream *in, u64 in_size, struct file_stream *out,
+							   u64* actual_out_nbytes_ret);
+
+//decompress multi concatenated gzip by stream & multi-thread
+int gzips_decompress_by_stream_mt(struct libdeflate_decompressor *decompressor,
+							      struct file_stream *in, u64 in_size, struct file_stream *out,
+							      int thread_num,u64* actual_out_nbytes_ret);
 
 #ifdef __cplusplus
 }
