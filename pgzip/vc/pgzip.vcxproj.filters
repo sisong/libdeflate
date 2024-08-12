@@ -1,17 +1,46 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
-    <ClCompile Include="..\..\..\libdeflate\lib\x86\cpu_features.c" />
-    <ClCompile Include="..\..\..\libdeflate\lib\deflate_compress.c" />
-    <ClCompile Include="..\..\..\libdeflate\lib\deflate_decompress.c" />
-    <ClCompile Include="..\..\..\libdeflate\lib\utils.c" />
-    <ClCompile Include="..\..\..\libdeflate\programs\prog_util.c" />
-    <ClCompile Include="..\..\..\libdeflate\programs\tgetopt.c" />
-    <ClCompile Include="..\..\..\libdeflate\lib\gzip_compress.c" />
-    <ClCompile Include="..\..\..\libdeflate\lib\crc32.c" />
-    <ClCompile Include="..\..\..\libdeflate\lib\gzip_decompress.c" />
-    <ClCompile Include="..\..\..\libdeflate\programs\gzip_compress_by_stream_mt.cpp" />
-    <ClCompile Include="..\..\..\libdeflate\programs\gzip_decompress_by_stream_mt.cpp" />
-    <ClCompile Include="..\..\..\libdeflate\programs\pgzip.c" />
+    <ClCompile Include="..\..\programs\gzip_compress_by_stream_mt.cpp" />
+    <ClCompile Include="..\..\programs\gzip_decompress_by_stream_mt.cpp" />
+    <ClCompile Include="..\..\programs\pgzip.c" />
+    <ClCompile Include="..\..\lib\arm\cpu_features.c">
+      <Filter>lib</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\lib\x86\cpu_features.c">
+      <Filter>lib</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\lib\crc32.c">
+      <Filter>lib</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\lib\deflate_compress.c">
+      <Filter>lib</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\lib\deflate_decompress.c">
+      <Filter>lib</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\lib\gzip_compress.c">
+      <Filter>lib</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\lib\gzip_decompress.c">
+      <Filter>lib</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\lib\utils.c">
+      <Filter>progu</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\programs\prog_util.c">
+      <Filter>progu</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\programs\tgetopt.c">
+      <Filter>progu</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="lib">
+      <UniqueIdentifier>{55f538d8-9daf-44b4-9d2a-1a632dbbee24}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="progu">
+      <UniqueIdentifier>{ee6bacf0-bac3-43a4-902f-3394f1120eb9}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
 </Project>
