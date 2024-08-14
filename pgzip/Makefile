@@ -43,7 +43,7 @@ else
   CXXFLAGS += -fvisibility-inlines-hidden
 endif
 CFLAGS   += $(DEF_FLAGS) 
-CXXFLAGS += $(DEF_FLAGS) -std=c++11
+CXXFLAGS += $(DEF_FLAGS) -std=c++11 -D_GLIBCXX_USE_NANOSLEEP
 
 DEF_LINK := -lpthread -lstdc++
 ifeq ($(M32),0)
