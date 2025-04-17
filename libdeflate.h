@@ -152,7 +152,7 @@ libdeflate_deflate_compress_block_uncompressed(struct libdeflate_compressor *com
 			    void *out_part, size_t out_part_nbytes_avail);
 
 /*
- * continue compress muti blocks by muti times
+ * continue compress multi blocks by multi times
  * note:
  *   current dict_nbytes must be equal to the previous dict_nbytes+in_block_nbytes, 
  *   and current in_block_with_dict[0..dict_nbytes]'s last 32KB values must be equal to the previous 
