@@ -89,7 +89,7 @@ struct TThreadData{
     static inline void _update_err_code(TThreadData* td,int err_code){
         if (err_code!=0){
             int _expected=0;
-            td->err_code.compare_exchange_weak(_expected,err_code);
+            td->err_code.compare_exchange_strong(_expected,err_code);
         }
     }
 
